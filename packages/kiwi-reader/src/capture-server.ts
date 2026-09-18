@@ -3,31 +3,63 @@ import type { IncomingMessage } from 'node:http';
 
 import { WebSocketServer, type WebSocket } from 'ws';
 
-import { SceneGraphStore } from './scenegraph.js';
+import { normalizeNodeId, SceneGraphStore } from './scenegraph.js';
 import { KiwiWireDecoder } from './wire.js';
 
 interface ExtensionHello {
   type: 'hello';
+  tabId: number;
   url: string;
   title?: string;
+  reset?: boolean;
 }
 
 interface ExtensionFrame {
   type: 'frame';
+  tabId: number;
   payload: string;
 }
 
 type ExtensionMessage = ExtensionHello | ExtensionFrame | { type: 'ping' };
 
-export interface CaptureStatus {
+export interface FigmaLocation {
+  fileKey: string;
+  selectedNodeId: string | null;
+}
+
+export interface CaptureSessionStatus {
+  tabId: number;
   connected: boolean;
-  url: string | null;
+  fileKey: string;
+  selectedNodeId: string | null;
+  url: string;
   title: string | null;
   schemaReady: boolean;
   nodes: number;
   decodedFrames: number;
   ignoredFrames: number;
 }
+
+export interface CaptureStatus {
+  connected: boolean;
+  sessions: readonly CaptureSessionStatus[];
+}
+
+export const parseFigmaLocation = (input: string): FigmaLocation | null => {
+  try {
+    const url = new URL(input);
+    if (url.hostname !== 'www.figma.com') return null;
+    const match = url.pathname.match(/^\/(?:design|file|board|proto|slides)\/([^/]+)/);
+    if (match?.[1] === undefined) return null;
+    const rawNodeId = url.searchParams.get('node-id');
+    return {
+      fileKey: match[1],
+      selectedNodeId: rawNodeId === null ? null : normalizeNodeId(rawNodeId),
+    };
+  } catch {
+    return null;
+  }
+};
 
 const isExtensionOrigin = (request: IncomingMessage): boolean => {
   const origin = request.headers.origin;
@@ -44,18 +76,80 @@ const parseMessage = (data: Buffer): ExtensionMessage | null => {
   }
 };
 
-export class KiwiCaptureServer extends EventEmitter {
+export class KiwiCaptureSession {
   readonly graph = new SceneGraphStore();
   readonly decoder = new KiwiWireDecoder();
 
+  connected = true;
+  fileKey: string;
+  selectedNodeId: string | null;
+  url: string;
+  title: string | null;
+  decodedFrames = 0;
+  ignoredFrames = 0;
+  lastActivityAt = Date.now();
+
+  constructor(
+    readonly tabId: number,
+    hello: ExtensionHello,
+    location: FigmaLocation,
+  ) {
+    this.fileKey = location.fileKey;
+    this.selectedNodeId = location.selectedNodeId;
+    this.url = hello.url;
+    this.title = hello.title ?? null;
+  }
+
+  get status(): CaptureSessionStatus {
+    return {
+      tabId: this.tabId,
+      connected: this.connected,
+      fileKey: this.fileKey,
+      selectedNodeId: this.selectedNodeId,
+      url: this.url,
+      title: this.title,
+      schemaReady: this.decoder.ready,
+      nodes: this.graph.size,
+      decodedFrames: this.decodedFrames,
+      ignoredFrames: this.ignoredFrames,
+    };
+  }
+
+  updateHello(hello: ExtensionHello, location: FigmaLocation): void {
+    if (hello.reset === true || location.fileKey !== this.fileKey) this.reset();
+    this.connected = true;
+    this.fileKey = location.fileKey;
+    this.selectedNodeId = location.selectedNodeId;
+    this.url = hello.url;
+    this.title = hello.title ?? null;
+    this.lastActivityAt = Date.now();
+  }
+
+  ingest(payload: string): number {
+    this.lastActivityAt = Date.now();
+    const decoded = this.decoder.ingestBase64(payload);
+    if (decoded.kind === 'message') {
+      this.decodedFrames++;
+      return this.graph.apply(decoded.message);
+    }
+    if (decoded.kind === 'ignored') this.ignoredFrames++;
+    return 0;
+  }
+
+  reset(): void {
+    this.graph.clear();
+    this.decoder.reset();
+    this.decodedFrames = 0;
+    this.ignoredFrames = 0;
+  }
+}
+
+export class KiwiCaptureServer extends EventEmitter {
   private readonly host: string;
   private readonly requestedPort: number;
+  private readonly sessionMap = new Map<number, KiwiCaptureSession>();
   private server: WebSocketServer | null = null;
   private socket: WebSocket | null = null;
-  private currentUrl: string | null = null;
-  private currentTitle: string | null = null;
-  private decodedFrames = 0;
-  private ignoredFrames = 0;
 
   constructor(options: { host?: string; port?: number } = {}) {
     super();
@@ -66,13 +160,12 @@ export class KiwiCaptureServer extends EventEmitter {
   get status(): CaptureStatus {
     return {
       connected: this.socket?.readyState === this.socket?.OPEN,
-      url: this.currentUrl,
-      title: this.currentTitle,
-      schemaReady: this.decoder.ready,
-      nodes: this.graph.size,
-      decodedFrames: this.decodedFrames,
-      ignoredFrames: this.ignoredFrames,
+      sessions: this.listSessions().map(session => session.status),
     };
+  }
+
+  get sessions(): readonly KiwiCaptureSession[] {
+    return this.listSessions();
   }
 
   async start(): Promise<number> {
@@ -99,17 +192,38 @@ export class KiwiCaptureServer extends EventEmitter {
   async stop(): Promise<void> {
     const server = this.server;
     this.server = null;
-    this.socket?.close();
+    this.socket?.close(1000, 'Server stopped');
     this.socket = null;
+    for (const session of this.sessionMap.values()) session.connected = false;
     if (server === null) return;
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
 
-  waitForNode(id: string, timeoutMs: number): Promise<void> {
-    if (this.graph.has(id)) return Promise.resolve();
+  listSessions(): KiwiCaptureSession[] {
+    return [...this.sessionMap.values()].toSorted((a, b) => b.lastActivityAt - a.lastActivityAt);
+  }
+
+  sessionForFile(fileKey: string): KiwiCaptureSession | null {
+    return this.listSessions().find(session => session.fileKey === fileKey) ?? null;
+  }
+
+  findNode(id: string, fileKey?: string): ReturnType<SceneGraphStore['find']> {
+    const sessions =
+      fileKey === undefined
+        ? this.listSessions()
+        : this.listSessions().filter(session => session.fileKey === fileKey);
+    for (const session of sessions) {
+      const node = session.graph.find(id);
+      if (node !== null) return node;
+    }
+    return null;
+  }
+
+  waitForNode(id: string, timeoutMs: number, fileKey?: string): Promise<void> {
+    if (this.findNode(id, fileKey) !== null) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const onUpdate = (): void => {
-        if (!this.graph.has(id)) return;
+        if (this.findNode(id, fileKey) === null) return;
         clearTimeout(timer);
         this.off('update', onUpdate);
         resolve();
@@ -130,35 +244,35 @@ export class KiwiCaptureServer extends EventEmitter {
     socket.on('message', data => {
       if (!Buffer.isBuffer(data)) return;
       const message = parseMessage(data);
-      if (message === null) return;
-      if (message.type === 'ping') return;
+      if (message === null || message.type === 'ping') return;
+
       if (message.type === 'hello') {
-        if (message.url !== this.currentUrl) {
-          this.graph.clear();
-          this.decoder.reset();
-          this.decodedFrames = 0;
-          this.ignoredFrames = 0;
+        const location = parseFigmaLocation(message.url);
+        if (location === null || !Number.isInteger(message.tabId)) return;
+        const current = this.sessionMap.get(message.tabId);
+        if (current === undefined) {
+          this.sessionMap.set(
+            message.tabId,
+            new KiwiCaptureSession(message.tabId, message, location),
+          );
+        } else {
+          current.updateHello(message, location);
         }
-        this.currentUrl = message.url;
-        this.currentTitle = message.title ?? null;
         this.emit('status', this.status);
         return;
       }
 
-      const decoded = this.decoder.ingestBase64(message.payload);
-      if (decoded.kind === 'message') {
-        this.decodedFrames++;
-        const applied = this.graph.apply(decoded.message);
-        if (applied > 0) this.emit('update', this.status);
-      } else if (decoded.kind === 'ignored') {
-        this.ignoredFrames++;
-      }
+      const session = this.sessionMap.get(message.tabId);
+      if (session === undefined) return;
+      const applied = session.ingest(message.payload);
+      if (applied > 0) this.emit('update', session.status);
       this.emit('status', this.status);
     });
 
     socket.on('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
+      for (const session of this.sessionMap.values()) session.connected = false;
       this.emit('status', this.status);
     });
   }

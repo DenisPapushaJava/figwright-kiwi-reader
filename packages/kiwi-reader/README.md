@@ -9,6 +9,17 @@ scenegraph already delivered to that authenticated tab.
 
 ```powershell
 corepack pnpm --filter @figwright/kiwi-reader build
+node .\packages\kiwi-reader\dist\serve.mjs
+```
+
+`serve.mjs` stays running and keeps an independent cache for every attached Figma tab. The extension
+sends the current tab URL, including its selected `node-id`; selecting a layer before clicking the
+extension therefore establishes the initial read target. URL changes while attached update that
+selection without merging files or tabs.
+
+For the one-shot diagnostic probe instead:
+
+```powershell
 node .\packages\kiwi-reader\dist\live-probe.mjs 'https://www.figma.com/design/FILE/NAME?node-id=6-140'
 ```
 
@@ -20,7 +31,10 @@ Load `packages/kiwi-reader/extension` as an unpacked Chrome extension. After sta
 activate the target Figma tab and click **Figwright Kiwi Reader**. Chrome shows its normal debugger
 notification and the extension reloads the tab once so the initial scenegraph is observable.
 
-The action is a toggle: click it again to detach.
+The action is a toggle: click it again to detach. An unexpected bridge restart triggers bounded
+reconnect attempts and a `WAIT` badge; after reconnect the extension reloads attached tabs once to
+recover each session's dynamic Kiwi schema. A clean bridge shutdown detaches the debugger and clears
+the badge.
 
 ## Security boundary
 

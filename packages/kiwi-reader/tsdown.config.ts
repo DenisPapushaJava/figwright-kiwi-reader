@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/live-probe.ts'],
+  entry: ['src/index.ts', 'src/live-probe.ts', 'src/serve.ts'],
   outDir: 'dist',
   format: 'esm',
   target: 'node24',

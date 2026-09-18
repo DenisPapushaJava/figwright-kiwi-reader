@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsdown",
+    "serve": "node dist/serve.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

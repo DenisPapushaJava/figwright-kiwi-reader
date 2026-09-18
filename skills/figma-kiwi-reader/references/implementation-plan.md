@@ -27,6 +27,11 @@ Figma tab -> Chrome debugger extension -> localhost capture service
 - Synthetic unit/integration tests pass.
 - Live tests succeeded on files containing 860 and 65,662 nodes.
 - Probe output is compact by default; `--raw` is explicit.
+- A persistent `serve.mjs` process now keeps capture state after the initial read.
+- Browser messages carry `tabId`; independent caches and selected `node-id` values are maintained
+  for multiple attached tabs, including two tabs showing the same Figma file.
+- The extension reports reconnect states and retries an unexpectedly lost local bridge with bounded
+  backoff.
 
 The implementation is under `packages/kiwi-reader`. The upstream research source and pinned commit
 are recorded in `packages/kiwi-reader/THIRD_PARTY.md`.

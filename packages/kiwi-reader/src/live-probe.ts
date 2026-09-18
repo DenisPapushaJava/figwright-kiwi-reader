@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { KiwiCaptureServer, jsonSafe, normalizeNodeId } from './index.js';
+import { type CaptureStatus, KiwiCaptureServer, jsonSafe, parseFigmaLocation } from './index.js';
 
 const input = process.argv[2];
 if (input === undefined) {
@@ -7,9 +7,10 @@ if (input === undefined) {
   process.exitCode = 1;
 } else {
   const url = new URL(input);
-  const rawNodeId = url.searchParams.get('node-id');
-  if (rawNodeId === null) throw new Error('The Figma URL has no node-id parameter');
-  const nodeId = normalizeNodeId(rawNodeId);
+  const location = parseFigmaLocation(url.href);
+  if (location === null) throw new Error('The URL is not a supported Figma file URL');
+  if (location.selectedNodeId === null) throw new Error('The Figma URL has no node-id parameter');
+  const nodeId = location.selectedNodeId;
 
   const server = new KiwiCaptureServer();
   const port = await server.start();
@@ -20,15 +21,16 @@ if (input === undefined) {
   );
 
   let lastLine = '';
-  server.on('status', status => {
-    const line = `connected=${status.connected} schema=${status.schemaReady} nodes=${status.nodes}`;
+  server.on('status', (status: CaptureStatus) => {
+    const session = status.sessions.find(item => item.fileKey === location.fileKey);
+    const line = `connected=${status.connected} schema=${session?.schemaReady ?? false} nodes=${session?.nodes ?? 0}`;
     if (line !== lastLine) console.error(line);
     lastLine = line;
   });
 
   try {
-    await server.waitForNode(nodeId, 120_000);
-    const node = server.graph.find(nodeId);
+    await server.waitForNode(nodeId, 120_000, location.fileKey);
+    const node = server.findNode(nodeId, location.fileKey);
     if (process.argv.includes('--raw')) {
       console.log(JSON.stringify(jsonSafe(node), null, 2));
     } else if (node !== null) {
