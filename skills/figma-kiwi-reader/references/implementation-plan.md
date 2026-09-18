@@ -105,6 +105,44 @@ URL, search its tree, and receive a bounded design context with no Figma plugin 
 Exit criteria: requesting the large tested section never produces the previous 26.7 MB raw output,
 and the agent receives enough section ids to ground the design incrementally.
 
+### Context projection strategy
+
+Use a layered, retrieval-first model inspired by MemPalace's useful architectural idea: retain the
+verbatim source locally and load progressively richer slices on demand. Do not use its AAAK dialect
+on design data; AAAK is lossy text summarization and cannot preserve exact visual properties.
+
+- **L0 — status:** file identity, connection state, capabilities, schema version and cache metrics.
+- **L1 — outline:** pages/top-level sections with ids, names, types, dimensions and descendant
+  counts. This is the default response for a whole file or oversized root.
+- **L2 — compact subtree:** exact hierarchy, geometry, text, auto-layout and style references for a
+  requested section, with repeated component structures deduplicated.
+- **L3 — full node/subtree:** every supported normalized property for an explicit node id, still
+  subject to hard byte/node budgets and asset references rather than inline binary data.
+
+Keep the full decoded Kiwi graph and blob store outside the model context. Build deterministic
+indexes for id, name, type and visible text so search selects a small exact subtree before
+projection. Consider embeddings only after deterministic search is measured insufficient on real
+files; a vector database is unnecessary for direct node URLs and exact layer names.
+
+Optimize tokens without damaging semantics:
+
+- omit no-op defaults such as `visible: true`, `opacity: 1` and `rotation: 0`;
+- intern repeated paints, effects, text styles and component structures into referenced tables;
+- preserve user-visible text, layer/component/token names, ids and numeric values verbatim;
+- never remove vowels or abbreviate arbitrary strings: tokenizer cost can increase and the agent
+  loses searchable names and meaning;
+- do not abbreviate public field names unless a versioned dictionary has measured end-to-end token
+  savings greater than its decoding cost and passes fidelity tests;
+- use MessagePack/Zstandard only between processes or for disk/cache size; transport compression
+  does not reduce model tokens after the MCP payload is decoded;
+- measure the final serialized result with the target model tokenizer, not a characters-per-token
+  estimate.
+
+MemPalace's lightweight three-tool MCP surface reduces tool-schema tokens, but Figwright should keep
+typed read tools initially: existing agents and `figma-codegen` already understand them, and their
+schemas prevent ambiguous design queries. Reconsider a consolidated query tool only after measuring
+tool-schema cost against the loss of discoverability and validation.
+
 ## Phase 5: vectors, images and visual verification
 
 ### Vectors
