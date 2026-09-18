@@ -6,13 +6,17 @@
   "type": "module",
   "scripts": {
     "build": "tsdown",
+    "mcp": "node dist/mcp.mjs",
     "serve": "node dist/serve.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@figwright/shared": "workspace:*",
+    "@modelcontextprotocol/server": "^2.0.0",
     "fzstd": "^0.1.1",
     "kiwi-schema": "^0.5.0",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

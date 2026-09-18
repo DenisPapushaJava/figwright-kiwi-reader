@@ -32,6 +32,10 @@ Figma tab -> Chrome debugger extension -> localhost capture service
   for multiple attached tabs, including two tabs showing the same Figma file.
 - The extension reports reconnect states and retries an unexpectedly lost local bridge with bounded
   backoff.
+- A pure Kiwi-to-`SerializedNode` normalizer now validates geometry, solid/gradient/image paints,
+  effects, corner/stroke data, text and horizontal/vertical auto-layout against the shared schema.
+- A separate read-only MCP entry point advertises six browser tools and applies a 2,000-node,
+  depth and 1.5-million-character budget before returning data to an agent.
 
 The implementation is under `packages/kiwi-reader`. The upstream research source and pinned commit
 are recorded in `packages/kiwi-reader/THIRD_PARTY.md`.
@@ -57,6 +61,9 @@ its cache, reconnect recovers automatically, and memory/queue limits fail explic
 
 ## Phase 2: Kiwi-to-Figwright normalization
 
+Status: initial observed-property slice implemented; live parity and the remaining component/token,
+mixed-text and asset fields are still open.
+
 Create a pure normalizer that emits the existing `SerializedNode` contract from `@figwright/shared`.
 Start with properties already observed live:
 
@@ -77,6 +84,10 @@ Exit criteria: schema validation passes, compact output for representative nodes
 result field by field, and every intentional difference is documented with a fidelity note.
 
 ## Phase 3: isolated read-only MCP entry point
+
+Status: initial entry point implemented with `browser_status`, `list_files`, `use_file`,
+`get_selection`, `get_node`, and `get_design_context`; live Codex configuration and round-trip remain
+to be completed.
 
 Keep the first usable server separate from the bidirectional `@figwright/mcp` entry point so the
 experiment cannot regress plugin routing or writes. Reuse existing tool specs, schemas, node-id URL

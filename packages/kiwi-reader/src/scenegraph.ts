@@ -27,6 +27,13 @@ export interface CapturedNode {
   children: CapturedNode[];
 }
 
+export interface SceneGraphFindResult {
+  node: CapturedNode | null;
+  visited: number;
+  nodeLimitReached: boolean;
+  depthLimitReached: boolean;
+}
+
 export const nodeId = (guid: KiwiGuid | undefined): string =>
   `${guid?.sessionID ?? 0}:${guid?.localID ?? 0}`;
 
@@ -67,8 +74,14 @@ export class SceneGraphStore {
   }
 
   find(id: string, maxDepth = 8, maxNodes = 2_000): CapturedNode | null {
+    return this.findWithStats(id, maxDepth, maxNodes).node;
+  }
+
+  findWithStats(id: string, maxDepth = 8, maxNodes = 2_000): SceneGraphFindResult {
     const normalized = normalizeNodeId(id);
-    if (!this.nodes.has(normalized)) return null;
+    if (!this.nodes.has(normalized)) {
+      return { node: null, visited: 0, nodeLimitReached: false, depthLimitReached: false };
+    }
 
     const childIds = new Map<string, Array<{ id: string; position: string }>>();
     for (const [childId, node] of this.nodes) {
@@ -83,13 +96,22 @@ export class SceneGraphStore {
     }
 
     let visited = 0;
+    let nodeLimitReached = false;
+    let depthLimitReached = false;
     const build = (nodeIdValue: string, depth: number): CapturedNode | null => {
       const raw = this.nodes.get(nodeIdValue);
-      if (raw === undefined || visited++ >= maxNodes) return null;
+      if (raw === undefined) return null;
+      if (visited >= maxNodes) {
+        nodeLimitReached = true;
+        return null;
+      }
+      visited++;
+      const directChildren = childIds.get(nodeIdValue) ?? [];
+      if (depth >= maxDepth && directChildren.length > 0) depthLimitReached = true;
       const children =
         depth >= maxDepth
           ? []
-          : (childIds.get(nodeIdValue) ?? [])
+          : directChildren
               .map(child => build(child.id, depth + 1))
               .filter((child): child is CapturedNode => child !== null);
       return {
@@ -102,11 +124,16 @@ export class SceneGraphStore {
       };
     };
 
-    return build(normalized, 0);
+    return {
+      node: build(normalized, 0),
+      visited,
+      nodeLimitReached,
+      depthLimitReached,
+    };
   }
 }
 
-export const normalizeNodeId = (id: string): string => id.replace('-', ':');
+export const normalizeNodeId = (id: string): string => id.replaceAll('-', ':');
 
 export const jsonSafe = (value: unknown): unknown => {
   if (value instanceof Uint8Array) return `<binary ${value.length} bytes>`;

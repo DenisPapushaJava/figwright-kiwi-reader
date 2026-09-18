@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/live-probe.ts', 'src/serve.ts'],
+  entry: ['src/index.ts', 'src/live-probe.ts', 'src/mcp.ts', 'src/serve.ts'],
   outDir: 'dist',
   format: 'esm',
   target: 'node24',
@@ -10,4 +10,5 @@ export default defineConfig({
   clean: true,
   shims: false,
   fixedExtension: true,
+  deps: { alwaysBundle: ['@figwright/shared'] },
 });

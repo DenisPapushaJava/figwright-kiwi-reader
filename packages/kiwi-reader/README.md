@@ -27,6 +27,25 @@ The probe prints a compact capture summary by default. Add `--raw` only when the
 subtree is needed; a large section can produce tens of megabytes of text because Figma includes
 glyph positions, component-derived data, and vector geometry.
 
+## Read-only MCP server
+
+The separate browser MCP entry point starts the same capture bridge and exposes only read tools:
+
+```powershell
+corepack pnpm --filter @figwright/kiwi-reader build
+node .\packages\kiwi-reader\dist\mcp.mjs
+```
+
+Configure an MCP client to launch that command from the repository root. It advertises
+`browser_status`, `list_files`, `use_file`, `get_selection`, `get_node`, and
+`get_design_context`. The latter accepts a pasted Figma URL directly; when `nodeId` is omitted it
+uses the selected node from the attached tab's URL.
+
+Normalized results use Figwright's existing `SerializedNode` contract. They retain geometry,
+paints, effects, text and auto-layout fields already confirmed on live Kiwi traffic while dropping
+`editInfo`, glyph caches and other private or high-volume wire fields. A response above the hard
+payload budget becomes a section plan so an agent can request individual child sections.
+
 Load `packages/kiwi-reader/extension` as an unpacked Chrome extension. After starting the probe,
 activate the target Figma tab and click **Figwright Kiwi Reader**. Chrome shows its normal debugger
 notification and the extension reloads the tab once so the initial scenegraph is observable.

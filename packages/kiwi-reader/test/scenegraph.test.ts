@@ -40,4 +40,34 @@ describe('SceneGraphStore', () => {
     });
     expect(graph.find('2:4')).toBeNull();
   });
+
+  it('reports depth and node truncation instead of silently dropping descendants', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 4, localID: 1 }, name: 'Root' },
+        {
+          guid: { sessionID: 4, localID: 2 },
+          parentIndex: { guid: { sessionID: 4, localID: 1 } },
+          name: 'Child',
+        },
+        {
+          guid: { sessionID: 4, localID: 3 },
+          parentIndex: { guid: { sessionID: 4, localID: 2 } },
+          name: 'Grandchild',
+        },
+      ],
+    });
+
+    expect(graph.findWithStats('4:1', 0, 10)).toMatchObject({
+      visited: 1,
+      depthLimitReached: true,
+      nodeLimitReached: false,
+    });
+    expect(graph.findWithStats('4:1', 10, 2)).toMatchObject({
+      visited: 2,
+      depthLimitReached: false,
+      nodeLimitReached: true,
+    });
+  });
 });
