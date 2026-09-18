@@ -24,6 +24,7 @@
     "knip:fix": "knip --fix",
     "lint": "oxlint --deny-warnings .",
     "lint:fix": "oxlint --fix .",
+    "package:kiwi": "node scripts/package-kiwi-release.mjs",
     "postinstall": "node scripts/sync-skills.mjs",
     "release": "node scripts/release.mjs",
     "test": "vitest run",

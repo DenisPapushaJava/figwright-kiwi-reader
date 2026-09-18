@@ -1,0 +1,26 @@
+{
+  "name": "fk",
+  "version": "0.3.1",
+  "description": "Read the current Figma browser selection through the local Figwright Kiwi bridge.",
+  "author": {
+    "name": "DenisPapusha"
+  },
+  "repository": "https://github.com/DenisPapushaJava/figwright-kiwi-reader",
+  "license": "MIT",
+  "keywords": ["figma", "figwright", "kiwi", "design-to-code", "read-only"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "FK",
+    "shortDescription": "Read Figma frames from the browser.",
+    "longDescription": "Connects Codex to the local read-only Figwright Kiwi Reader so any task can inspect the selected Figma frame or a node from a Figma URL.",
+    "developerName": "DenisPapusha",
+    "category": "Productivity",
+    "capabilities": ["Read"],
+    "defaultPrompt": [
+      "Read the selected Figma frame.",
+      "Get design context from this Figma URL.",
+      "Check the Figma browser connection."
+    ]
+  }
+}

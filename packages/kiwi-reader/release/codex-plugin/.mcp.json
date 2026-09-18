@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "fk": {
+      "command": "node",
+      "args": ["REPLACED_BY_INSTALLER"],
+      "startup_timeout_sec": 120,
+      "tool_timeout_sec": 120,
+      "default_tools_approval_mode": "auto"
+    }
+  }
+}

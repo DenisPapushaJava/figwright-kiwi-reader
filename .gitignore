@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+artifacts/
 coverage/
 # Vitest 5 writes reporter output and test attachments here (html / json / junit / blob).
 .vitest/
