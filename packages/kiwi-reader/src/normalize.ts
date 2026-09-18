@@ -230,8 +230,8 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
   const text = record(raw.textData);
   if (text === null) return;
   const characters = typeof text.characters === 'string' ? text.characters : undefined;
-  const fontSize = finiteNumber(text.fontSize);
-  const font = record(text.fontName);
+  const fontSize = finiteNumber(raw.fontSize ?? text.fontSize);
+  const font = record(raw.fontName ?? text.fontName);
   const family = nonEmptyString(font?.family);
   const style = nonEmptyString(font?.style);
   if (characters !== undefined) output.characters = characters;

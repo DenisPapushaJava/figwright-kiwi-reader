@@ -108,8 +108,18 @@ const projectNode = (node: SerializedNode, detail: DetailLevel): Record<string, 
       ...(children ? { children } : {}),
     };
   }
-  const { locked: _locked, parentId: _parentId, visible, ...full } = node;
-  return { ...full, ...(visible ? {} : { visible: false }) };
+  const {
+    locked: _locked,
+    parentId: _parentId,
+    visible,
+    children: _sourceChildren,
+    ...full
+  } = node;
+  return {
+    ...full,
+    ...(visible ? {} : { visible: false }),
+    ...(children ? { children } : {}),
+  };
 };
 
 const countTree = (node: CapturedNode): number =>

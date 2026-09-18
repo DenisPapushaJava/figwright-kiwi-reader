@@ -39,6 +39,8 @@ describe('normalizeCapturedNode', () => {
         stackVerticalPadding: 12,
         stackPrimaryAlignItems: 'CENTER',
         stackCounterAlignItems: 'CENTER',
+        fontSize: 18,
+        fontName: { family: 'Inter', style: 'Semi Bold', postscript: 'Inter-SemiBold' },
         textData: {
           characters: 'Continue',
           fontSize: 16,
@@ -75,7 +77,8 @@ describe('normalizeCapturedNode', () => {
         itemSpacing: 8,
       },
       characters: 'Continue',
-      fontName: { family: 'Inter', style: 'Medium' },
+      fontSize: 18,
+      fontName: { family: 'Inter', style: 'Semi Bold' },
       lineHeight: { value: 24, unit: 'PIXELS' },
     });
     expect(JSON.stringify(node)).not.toMatch(/derivedTextData|editInfo|postscript|userId/);
