@@ -1,9 +1,14 @@
+import { waitForWebSocketOpen } from './bridge-connection.js';
+import { frameBudgetError } from './frame-budget.js';
+
 const BRIDGE_URL = 'ws://127.0.0.1:9224';
+const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
 const CAPTURE_TIMEOUT_MS = 20_000;
 const attachedTabs = new Set();
 const tabStates = new Map();
 const readyTimers = new Map();
 const captureTimers = new Map();
+const blockedFrameTabs = new Set();
 let bridge = null;
 let connecting = null;
 let keepAlive = null;
@@ -75,6 +80,23 @@ const send = message => {
   if (bridge?.readyState === WebSocket.OPEN) bridge.send(JSON.stringify(message));
 };
 
+const closeBridgeIfIdle = () => {
+  if (attachedTabs.size > 0) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  if (bridge?.readyState === WebSocket.OPEN) bridge.close(1000, 'No attached Figma tabs');
+};
+
+const removeAttachedTab = (tabId, publish = true) => {
+  clearTabTimers(tabId);
+  blockedFrameTabs.delete(tabId);
+  const wasAttached = attachedTabs.delete(tabId);
+  if (wasAttached) send({ type: 'detach', tabId });
+  if (publish) void publishState(tabId, initialState(tabId));
+  else tabStates.delete(tabId);
+  if (wasAttached) closeBridgeIfIdle();
+};
+
 const sendHello = async (tabId, reset = false) => {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.url?.startsWith('https://www.figma.com/')) return;
@@ -121,7 +143,13 @@ const scheduleCaptureTimeout = tabId => {
 };
 
 const applyCaptureStatus = session => {
-  if (!Number.isInteger(session?.tabId) || !attachedTabs.has(session.tabId)) return;
+  if (
+    !Number.isInteger(session?.tabId) ||
+    !attachedTabs.has(session.tabId) ||
+    blockedFrameTabs.has(session.tabId)
+  ) {
+    return;
+  }
   const phase = session.schemaReady && session.nodes > 0 ? 'reading' : 'waiting';
   void publishState(session.tabId, {
     attached: true,
@@ -146,6 +174,7 @@ const applyCaptureStatus = session => {
 const detachAll = async () => {
   const tabIds = [...attachedTabs];
   attachedTabs.clear();
+  blockedFrameTabs.clear();
   await Promise.all(
     tabIds.map(async tabId => {
       clearTabTimers(tabId);
@@ -199,73 +228,76 @@ const connectBridge = () => {
   if (bridge?.readyState === WebSocket.OPEN) return Promise.resolve();
   if (connecting !== null) return connecting;
 
-  connecting = new Promise((resolve, reject) => {
-    const socket = new WebSocket(BRIDGE_URL);
-    bridge = socket;
-    socket.addEventListener('open', () => {
+  const socket = new WebSocket(BRIDGE_URL);
+  bridge = socket;
+  socket.addEventListener('message', event => {
+    try {
+      const message = JSON.parse(event.data);
+      if (message.type === 'capture-status') applyCaptureStatus(message.session);
+      if (message.type === 'capture-error' && attachedTabs.has(message.tabId)) {
+        clearTabTimers(message.tabId);
+        void publishState(message.tabId, {
+          attached: true,
+          bridgeConnected: true,
+          phase: 'error',
+          title: message.session?.title ?? getState(message.tabId).title,
+          fileKey: message.session?.fileKey ?? getState(message.tabId).fileKey,
+          selectedNodeId: message.session?.selectedNodeId ?? getState(message.tabId).selectedNodeId,
+          schemaReady: message.session?.schemaReady ?? false,
+          nodes: message.session?.nodes ?? 0,
+          decodedFrames: message.session?.decodedFrames ?? 0,
+          ignoredFrames: message.session?.ignoredFrames ?? 0,
+          errorCode: message.code,
+          errorMessage: message.message,
+        });
+      }
+    } catch {
+      // Ignore messages from incompatible bridge versions.
+    }
+  });
+  socket.addEventListener('close', event => {
+    if (bridge === socket) bridge = null;
+    clearInterval(keepAlive);
+    keepAlive = null;
+    if (event.code === 1000) void detachAll();
+    else {
+      for (const tabId of attachedTabs) {
+        clearTabTimers(tabId);
+        void publishState(tabId, {
+          bridgeConnected: false,
+          phase: 'reconnecting',
+          errorCode: 'BRIDGE_CONNECTION_LOST',
+          errorMessage: 'Нет связи с локальным MCP',
+        });
+      }
+      scheduleReconnect();
+    }
+  });
+
+  const attempt = waitForWebSocketOpen(socket, BRIDGE_CONNECT_TIMEOUT_MS)
+    .then(() => {
       const reconnecting = attachedTabs.size > 0;
-      connecting = null;
       reconnectDelay = 1000;
       clearInterval(keepAlive);
       keepAlive = setInterval(() => send({ type: 'ping' }), 20_000);
       if (reconnecting) void resyncAttachedTabs();
-      resolve();
-    });
-    socket.addEventListener('message', event => {
-      try {
-        const message = JSON.parse(event.data);
-        if (message.type === 'capture-status') applyCaptureStatus(message.session);
-        if (message.type === 'capture-error' && attachedTabs.has(message.tabId)) {
-          clearTabTimers(message.tabId);
-          void publishState(message.tabId, {
-            attached: true,
-            bridgeConnected: true,
-            phase: 'error',
-            title: message.session?.title ?? getState(message.tabId).title,
-            fileKey: message.session?.fileKey ?? getState(message.tabId).fileKey,
-            selectedNodeId:
-              message.session?.selectedNodeId ?? getState(message.tabId).selectedNodeId,
-            schemaReady: message.session?.schemaReady ?? false,
-            nodes: message.session?.nodes ?? 0,
-            decodedFrames: message.session?.decodedFrames ?? 0,
-            ignoredFrames: message.session?.ignoredFrames ?? 0,
-            errorCode: message.code,
-            errorMessage: message.message,
-          });
-        }
-      } catch {
-        // Ignore messages from incompatible bridge versions.
-      }
-    });
-    socket.addEventListener('error', () => {
-      connecting = null;
-      reject(new Error('Локальный Kiwi MCP не отвечает на 127.0.0.1:9224'));
-    });
-    socket.addEventListener('close', event => {
+      return undefined;
+    })
+    .catch(error => {
       if (bridge === socket) bridge = null;
-      connecting = null;
-      clearInterval(keepAlive);
-      keepAlive = null;
-      if (event.code === 1000) void detachAll();
-      else {
-        for (const tabId of attachedTabs) {
-          clearTabTimers(tabId);
-          void publishState(tabId, {
-            bridgeConnected: false,
-            phase: 'reconnecting',
-            errorCode: 'BRIDGE_CONNECTION_LOST',
-            errorMessage: 'Нет связи с локальным MCP',
-          });
-        }
-        scheduleReconnect();
-      }
+      if (socket.readyState === WebSocket.OPEN) socket.close();
+      throw error;
+    })
+    .finally(() => {
+      if (connecting === attempt) connecting = null;
     });
-  });
+  connecting = attempt;
   return connecting;
 };
 
 const reloadCapture = async tabId => {
   clearTabTimers(tabId);
+  blockedFrameTabs.delete(tabId);
   await publishState(tabId, {
     phase: 'reloading',
     errorCode: null,
@@ -312,19 +344,25 @@ const attach = async tab => {
   try {
     await reloadCapture(tab.id);
   } catch (error) {
+    removeAttachedTab(tab.id);
+    try {
+      await chrome.debugger.detach({ tabId: tab.id });
+    } catch {
+      // The failed capture may already have detached the debugger.
+    }
     throw Object.assign(error, { code: 'CAPTURE_START_FAILED' });
   }
 };
 
 const detach = async tabId => {
-  clearTabTimers(tabId);
-  if (attachedTabs.has(tabId)) await chrome.debugger.detach({ tabId });
-  attachedTabs.delete(tabId);
-  await publishState(tabId, initialState(tabId));
-  if (attachedTabs.size === 0) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
-    bridge?.close(1000, 'No attached Figma tabs');
+  const wasAttached = attachedTabs.has(tabId);
+  removeAttachedTab(tabId);
+  if (wasAttached) {
+    try {
+      await chrome.debugger.detach({ tabId });
+    } catch {
+      // Reaching the desired detached state is sufficient.
+    }
   }
 };
 
@@ -360,15 +398,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId || !attachedTabs.has(source.tabId)) return;
   if (method === 'Network.webSocketFrameReceived' && params.response?.opcode === 2) {
+    if (blockedFrameTabs.has(source.tabId)) return;
+    const budgetError = frameBudgetError(
+      params.response.payloadData.length,
+      bridge?.bufferedAmount ?? 0,
+    );
+    if (budgetError !== null) {
+      blockedFrameTabs.add(source.tabId);
+      clearTabTimers(source.tabId);
+      void reportError(source.tabId, budgetError.code, new Error(budgetError.message));
+      return;
+    }
     send({ type: 'frame', tabId: source.tabId, payload: params.response.payloadData });
   }
 });
 
 chrome.debugger.onDetach.addListener(source => {
-  if (!source.tabId) return;
-  clearTabTimers(source.tabId);
-  attachedTabs.delete(source.tabId);
-  void publishState(source.tabId, initialState(source.tabId));
+  if (!source.tabId || !attachedTabs.has(source.tabId)) return;
+  removeAttachedTab(source.tabId);
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -377,7 +424,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 });
 
 chrome.tabs.onRemoved.addListener(tabId => {
-  clearTabTimers(tabId);
-  attachedTabs.delete(tabId);
-  tabStates.delete(tabId);
+  if (attachedTabs.has(tabId)) removeAttachedTab(tabId, false);
+  else tabStates.delete(tabId);
 });

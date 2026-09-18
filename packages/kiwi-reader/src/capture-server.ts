@@ -3,8 +3,11 @@ import type { IncomingMessage } from 'node:http';
 
 import { WebSocketServer, type WebSocket } from 'ws';
 
-import { normalizeNodeId, SceneGraphStore } from './scenegraph.js';
+import { normalizeNodeId, SceneGraphLimitError, SceneGraphStore } from './scenegraph.js';
 import { KiwiWireDecoder } from './wire.js';
+
+export const FIGWRIGHT_KIWI_EXTENSION_ID = 'ppaieabnmndpngcaeafaooajodebhmci';
+export const FIGWRIGHT_KIWI_EXTENSION_ORIGIN = `chrome-extension://${FIGWRIGHT_KIWI_EXTENSION_ID}`;
 
 interface ExtensionHello {
   type: 'hello';
@@ -20,7 +23,12 @@ interface ExtensionFrame {
   payload: string;
 }
 
-type ExtensionMessage = ExtensionHello | ExtensionFrame | { type: 'ping' };
+interface ExtensionDetach {
+  type: 'detach';
+  tabId: number;
+}
+
+type ExtensionMessage = ExtensionHello | ExtensionFrame | ExtensionDetach | { type: 'ping' };
 
 export interface FigmaLocation {
   fileKey: string;
@@ -53,7 +61,7 @@ interface CaptureStatusMessage {
 interface CaptureErrorMessage {
   type: 'capture-error';
   tabId: number;
-  code: 'KIWI_DECODE_FAILED';
+  code: 'CAPTURE_LIMIT_EXCEEDED' | 'KIWI_DECODE_FAILED';
   message: string;
   session: CaptureSessionStatus;
 }
@@ -74,16 +82,41 @@ export const parseFigmaLocation = (input: string): FigmaLocation | null => {
   }
 };
 
-const isExtensionOrigin = (request: IncomingMessage): boolean => {
+const isExtensionOrigin = (request: IncomingMessage, expectedOrigin: string): boolean => {
   const origin = request.headers.origin;
-  return origin?.startsWith('chrome-extension://') === true;
+  return origin === expectedOrigin;
 };
 
 const parseMessage = (data: Buffer): ExtensionMessage | null => {
   try {
     const value: unknown = JSON.parse(data.toString('utf8'));
     if (typeof value !== 'object' || value === null || !('type' in value)) return null;
-    return value as ExtensionMessage;
+    const message = value as Record<string, unknown>;
+    if (message.type === 'ping') return { type: 'ping' };
+    if (message.type === 'detach' && Number.isInteger(message.tabId)) {
+      return { type: 'detach', tabId: message.tabId as number };
+    }
+    if (
+      message.type === 'hello' &&
+      Number.isInteger(message.tabId) &&
+      typeof message.url === 'string'
+    ) {
+      return {
+        type: 'hello',
+        tabId: message.tabId as number,
+        url: message.url,
+        ...(typeof message.title === 'string' ? { title: message.title } : {}),
+        ...(message.reset === true ? { reset: true } : {}),
+      };
+    }
+    if (
+      message.type === 'frame' &&
+      Number.isInteger(message.tabId) &&
+      typeof message.payload === 'string'
+    ) {
+      return { type: 'frame', tabId: message.tabId as number, payload: message.payload };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -101,6 +134,9 @@ export class KiwiCaptureSession {
   decodedFrames = 0;
   ignoredFrames = 0;
   consecutiveDecodeFailures = 0;
+  decodeFailureReported = false;
+  captureLimitReached = false;
+  captureErrorActive = false;
   lastActivityAt = Date.now();
 
   constructor(
@@ -140,18 +176,36 @@ export class KiwiCaptureSession {
   }
 
   ingest(payload: string): number {
+    if (this.captureLimitReached) return 0;
     this.lastActivityAt = Date.now();
     const decoded = this.decoder.ingestBase64(payload);
     if (decoded.kind === 'message') {
       this.consecutiveDecodeFailures = 0;
+      this.decodeFailureReported = false;
+      this.captureErrorActive = false;
       this.decodedFrames++;
-      return this.graph.apply(decoded.message);
+      try {
+        return this.graph.apply(decoded.message);
+      } catch (error) {
+        if (error instanceof SceneGraphLimitError) {
+          this.captureLimitReached = true;
+          this.captureErrorActive = true;
+        }
+        throw error;
+      }
     }
-    if (decoded.kind === 'schema') this.consecutiveDecodeFailures = 0;
+    if (decoded.kind === 'schema') {
+      this.consecutiveDecodeFailures = 0;
+      this.decodeFailureReported = false;
+      this.captureErrorActive = false;
+    }
     if (decoded.kind === 'ignored') {
       this.ignoredFrames++;
       this.consecutiveDecodeFailures++;
-      if (decoded.source === 'schema' || this.consecutiveDecodeFailures >= 3) {
+      const thresholdReached = decoded.source === 'schema' || this.consecutiveDecodeFailures >= 3;
+      if (thresholdReached && !this.decodeFailureReported) {
+        this.decodeFailureReported = true;
+        this.captureErrorActive = true;
         throw new Error(decoded.error);
       }
     }
@@ -164,20 +218,36 @@ export class KiwiCaptureSession {
     this.decodedFrames = 0;
     this.ignoredFrames = 0;
     this.consecutiveDecodeFailures = 0;
+    this.decodeFailureReported = false;
+    this.captureLimitReached = false;
+    this.captureErrorActive = false;
   }
 }
 
 export class KiwiCaptureServer extends EventEmitter {
   private readonly host: string;
   private readonly requestedPort: number;
+  private readonly statusThrottleMs: number;
+  private readonly extensionOrigin: string;
   private readonly sessionMap = new Map<number, KiwiCaptureSession>();
+  private readonly statusTimers = new Map<number, ReturnType<typeof setTimeout>>();
+  private readonly lastStatusAt = new Map<number, number>();
   private server: WebSocketServer | null = null;
   private socket: WebSocket | null = null;
 
-  constructor(options: { host?: string; port?: number } = {}) {
+  constructor(
+    options: {
+      host?: string;
+      port?: number;
+      statusThrottleMs?: number;
+      extensionOrigin?: string;
+    } = {},
+  ) {
     super();
     this.host = options.host ?? '127.0.0.1';
     this.requestedPort = options.port ?? 9224;
+    this.statusThrottleMs = options.statusThrottleMs ?? 100;
+    this.extensionOrigin = options.extensionOrigin ?? FIGWRIGHT_KIWI_EXTENSION_ORIGIN;
   }
 
   get status(): CaptureStatus {
@@ -196,8 +266,9 @@ export class KiwiCaptureServer extends EventEmitter {
     const server = new WebSocketServer({
       host: this.host,
       port: this.requestedPort,
-      maxPayload: 256 * 1024 * 1024,
-      verifyClient: ({ req }: { req: IncomingMessage }) => isExtensionOrigin(req),
+      maxPayload: 64 * 1024 * 1024,
+      verifyClient: ({ req }: { req: IncomingMessage }) =>
+        isExtensionOrigin(req, this.extensionOrigin),
     });
     this.server = server;
 
@@ -217,7 +288,9 @@ export class KiwiCaptureServer extends EventEmitter {
     this.server = null;
     this.socket?.close(1000, 'Server stopped');
     this.socket = null;
+    this.clearStatusTimers();
     for (const session of this.sessionMap.values()) session.connected = false;
+    this.emit('stopped');
     if (server === null) return;
     await new Promise<void>(resolve => server.close(() => resolve()));
   }
@@ -245,17 +318,26 @@ export class KiwiCaptureServer extends EventEmitter {
   waitForNode(id: string, timeoutMs: number, fileKey?: string): Promise<void> {
     if (this.findNode(id, fileKey) !== null) return Promise.resolve();
     return new Promise((resolve, reject) => {
-      const onUpdate = (): void => {
-        if (this.findNode(id, fileKey) === null) return;
+      const cleanup = (): void => {
         clearTimeout(timer);
         this.off('update', onUpdate);
+        this.off('stopped', onStopped);
+      };
+      const onUpdate = (): void => {
+        if (this.findNode(id, fileKey) === null) return;
+        cleanup();
         resolve();
       };
+      const onStopped = (): void => {
+        cleanup();
+        reject(new Error(`Capture server stopped while waiting for Figma node ${id}`));
+      };
       const timer = setTimeout(() => {
-        this.off('update', onUpdate);
+        cleanup();
         reject(new Error(`Timed out waiting for Figma node ${id}`));
       }, timeoutMs);
       this.on('update', onUpdate);
+      this.once('stopped', onStopped);
     });
   }
 
@@ -280,8 +362,12 @@ export class KiwiCaptureServer extends EventEmitter {
         } else {
           session.updateHello(message, location);
         }
-        this.sendSessionStatus(socket, session);
-        this.emit('status', this.status);
+        this.queueSessionStatus(socket, session, true);
+        return;
+      }
+
+      if (message.type === 'detach') {
+        this.removeSession(message.tabId);
         return;
       }
 
@@ -290,14 +376,15 @@ export class KiwiCaptureServer extends EventEmitter {
       try {
         const applied = session.ingest(message.payload);
         if (applied > 0) this.emit('update', session.status);
-        this.sendSessionStatus(socket, session);
-        this.emit('status', this.status);
+        if (!session.captureErrorActive) this.queueSessionStatus(socket, session);
       } catch (error) {
+        this.cancelSessionStatus(session.tabId);
         const detail = error instanceof Error ? error.message : String(error);
         const response: CaptureErrorMessage = {
           type: 'capture-error',
           tabId: session.tabId,
-          code: 'KIWI_DECODE_FAILED',
+          code:
+            error instanceof SceneGraphLimitError ? 'CAPTURE_LIMIT_EXCEEDED' : 'KIWI_DECODE_FAILED',
           message: detail,
           session: session.status,
         };
@@ -308,14 +395,63 @@ export class KiwiCaptureServer extends EventEmitter {
     socket.on('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
+      this.clearStatusTimers();
       for (const session of this.sessionMap.values()) session.connected = false;
       this.emit('status', this.status);
     });
   }
 
+  private removeSession(tabId: number): void {
+    const session = this.sessionMap.get(tabId);
+    if (session === undefined) return;
+    session.connected = false;
+    this.sessionMap.delete(tabId);
+    this.cancelSessionStatus(tabId);
+    this.lastStatusAt.delete(tabId);
+    this.emit('status', this.status);
+  }
+
+  private queueSessionStatus(
+    socket: WebSocket,
+    session: KiwiCaptureSession,
+    immediate = false,
+  ): void {
+    const now = Date.now();
+    const elapsed = now - (this.lastStatusAt.get(session.tabId) ?? 0);
+    if (immediate || this.statusThrottleMs === 0 || elapsed >= this.statusThrottleMs) {
+      this.sendSessionStatus(socket, session);
+      return;
+    }
+    if (this.statusTimers.has(session.tabId)) return;
+    const timer = setTimeout(() => {
+      this.statusTimers.delete(session.tabId);
+      if (this.socket === socket && this.sessionMap.get(session.tabId) === session) {
+        this.sendSessionStatus(socket, session);
+      }
+    }, this.statusThrottleMs - elapsed);
+    this.statusTimers.set(session.tabId, timer);
+  }
+
   private sendSessionStatus(socket: WebSocket, session: KiwiCaptureSession): void {
     if (socket.readyState !== socket.OPEN) return;
+    const timer = this.statusTimers.get(session.tabId);
+    if (timer !== undefined) clearTimeout(timer);
+    this.statusTimers.delete(session.tabId);
+    this.lastStatusAt.set(session.tabId, Date.now());
     const message: CaptureStatusMessage = { type: 'capture-status', session: session.status };
     socket.send(JSON.stringify(message));
+    this.emit('status', this.status);
+  }
+
+  private clearStatusTimers(): void {
+    for (const timer of this.statusTimers.values()) clearTimeout(timer);
+    this.statusTimers.clear();
+    this.lastStatusAt.clear();
+  }
+
+  private cancelSessionStatus(tabId: number): void {
+    const timer = this.statusTimers.get(tabId);
+    if (timer !== undefined) clearTimeout(timer);
+    this.statusTimers.delete(tabId);
   }
 }

@@ -28,9 +28,10 @@ const stop = async (): Promise<void> => {
   await server.stop();
 };
 
-process.once('SIGINT', () => void stop());
-process.once('SIGTERM', () => void stop());
 await new Promise<void>(resolve => {
-  process.once('SIGINT', resolve);
-  process.once('SIGTERM', resolve);
+  const onSignal = (): void => {
+    void stop().finally(resolve);
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
 });

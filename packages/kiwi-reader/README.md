@@ -51,10 +51,17 @@ the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi R
 **Подключить макет**. Chrome shows its normal debugger notification and the extension reloads the tab
 once so the initial scenegraph is observable.
 
+The checked-in manifest key pins the unpacked extension ID to
+`ppaieabnmndpngcaeafaooajodebhmci`, which lets the local server reject every other extension
+origin. If an older unpacked installation shows a different ID after this update, remove that entry
+from `chrome://extensions` and load the same directory again once.
+
 The popup reports the actual capture phase, file and selected node, decoded frame count, and number
 of nodes received. Its progress bar is intentionally indeterminate while capture is active: the
 Kiwi stream does not advertise a total node count from which an honest percentage could be
-calculated. Chrome always closes an action popup when it loses focus. Use the pin button in the
+calculated. Progress notifications are coalesced to at most ten updates per second so a large file
+does not turn every wire message into several Chrome action API calls. Chrome always closes an
+action popup when it loses focus. Use the pin button in the
 popup to move the same controls into Chrome's persistent side panel while selecting frames on the
 canvas. The action badge keeps the compact state: `…` while connecting, `SYNC` while nodes arrive,
 `✓` when the graph has settled, `WAIT` while reconnecting, and `ERR` on an actionable failure.
@@ -67,14 +74,19 @@ tokens, frame payloads and design content.
 
 An unexpected bridge restart triggers bounded reconnect attempts; after reconnect the extension
 reloads attached tabs once to recover each session's dynamic Kiwi schema. A clean bridge shutdown
-detaches the debugger and clears the badge.
+detaches the debugger and clears the badge. Manual, external and tab-close detach paths also remove
+their server session, preventing stale files from remaining available to MCP reads.
 
 ## Security boundary
 
 - Captures only server-to-browser binary frames; sent frames are never forwarded.
 - Does not read or export Figma cookies.
 - Does not open a second multiplayer session.
-- Binds the bridge to `127.0.0.1` and accepts browser connections only from an extension origin.
+- Binds the bridge to `127.0.0.1` and accepts only the exact origin of the pinned Kiwi Reader
+  extension ID.
+- Stops forwarding when a single encoded frame exceeds 48 MiB or the browser bridge queue exceeds
+  32 MiB. The server additionally caps WebSocket messages at 64 MiB and each scenegraph at 250,000
+  nodes.
 - Contains no encode or mutation API.
 
 This is an experimental decoder for an undocumented protocol. Figma can change the wire format at
