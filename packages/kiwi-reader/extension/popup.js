@@ -10,6 +10,7 @@ const elements = {
   nodeId: document.querySelector('#node-id'),
   nodeCount: document.querySelector('#node-count'),
   frameCount: document.querySelector('#frame-count'),
+  pin: document.querySelector('#pin-action'),
   primary: document.querySelector('#primary-action'),
   disconnect: document.querySelector('#disconnect-action'),
 };
@@ -28,6 +29,7 @@ const phaseCopy = {
 let tabId = null;
 let currentState = null;
 let supportedTab = false;
+const isSidePanel = document.body.classList.contains('side-panel');
 
 const formatNumber = value => new Intl.NumberFormat('ru-RU').format(value ?? 0);
 
@@ -91,6 +93,7 @@ const render = state => {
   elements.frameCount.textContent = formatNumber(state?.decodedFrames);
 
   const busy = ['connecting', 'reloading'].includes(phase);
+  if (elements.pin) elements.pin.disabled = !supportedTab;
   elements.primary.disabled = !supportedTab || busy;
   elements.primary.textContent = state?.attached ? 'Считать заново' : 'Подключить макет';
   elements.disconnect.hidden = !state?.attached;
@@ -129,12 +132,48 @@ const runAction = async type => {
   }
 };
 
+const refreshActiveTab = async () => {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  tabId = tab?.id ?? null;
+  supportedTab = tab?.url?.startsWith('https://www.figma.com/') === true;
+  if (tabId === null) {
+    render(null);
+    return;
+  }
+  try {
+    render(await request('get-state'));
+  } catch (error) {
+    render({
+      phase: 'error',
+      errorCode: error.code ?? 'PANEL_INIT_FAILED',
+      errorMessage: error.message,
+    });
+  }
+};
+
 elements.primary.addEventListener('click', () => {
   void runAction(currentState?.attached ? 'recapture' : 'connect');
 });
 
 elements.disconnect.addEventListener('click', () => {
   void runAction('disconnect');
+});
+
+elements.pin?.addEventListener('click', async () => {
+  if (tabId === null || !supportedTab) return;
+  elements.pin.disabled = true;
+  try {
+    await chrome.sidePanel.open({ tabId });
+    window.close();
+  } catch (error) {
+    elements.pin.disabled = false;
+    render({
+      ...currentState,
+      phase: 'error',
+      errorCode: 'SIDE_PANEL_OPEN_FAILED',
+      errorMessage: error.message,
+    });
+  }
 });
 
 elements.copyDiagnostics.addEventListener('click', async () => {
@@ -150,21 +189,16 @@ chrome.runtime.onMessage.addListener(message => {
   if (message?.type === 'kiwi-state' && message.state?.tabId === tabId) render(message.state);
 });
 
-void (async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  tabId = tab?.id ?? null;
-  supportedTab = tab?.url?.startsWith('https://www.figma.com/') === true;
-  if (tabId === null) {
-    render(null);
-    return;
-  }
-  try {
-    render(await request('get-state'));
-  } catch (error) {
-    render({
-      phase: 'error',
-      errorCode: error.code ?? 'POPUP_INIT_FAILED',
-      errorMessage: error.message,
-    });
-  }
-})();
+if (isSidePanel) {
+  chrome.tabs.onActivated.addListener(() => void refreshActiveTab());
+  chrome.tabs.onUpdated.addListener((updatedTabId, changeInfo) => {
+    if (
+      updatedTabId === tabId &&
+      (changeInfo.url !== undefined || changeInfo.status === 'complete')
+    ) {
+      void refreshActiveTab();
+    }
+  });
+}
+
+void refreshActiveTab();

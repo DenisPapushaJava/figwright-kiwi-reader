@@ -6,27 +6,14 @@
     <title>Figwright Kiwi Reader</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
-  <body>
+  <body class="side-panel">
     <main class="panel">
       <header class="header">
         <img src="icons/icon-32.png" width="36" height="36" alt="" />
         <div class="header-copy">
           <h1>Figwright Reader</h1>
-          <p>Figma → Codex, только чтение</p>
+          <p>Панель закреплена · Figma → Codex</p>
         </div>
-        <button
-          id="pin-action"
-          class="pin-action"
-          type="button"
-          aria-label="Закрепить в боковой панели"
-          title="Закрепить панель"
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path
-              d="m14.8 4.1 5.1 5.1-2.2 1.1-2.9 4.9.8 2.3-1.1 1.1-3.6-3.5-4.9 4.8-.8-.8 4.8-4.9-3.5-3.6 1.1-1.1 2.3.8 4.9-2.9 1.1-2.2Z"
-            />
-          </svg>
-        </button>
       </header>
 
       <section class="status-card" aria-live="polite">
@@ -71,8 +58,8 @@
       </section>
 
       <p class="hint">
-        Общий размер заранее неизвестен: полоса показывает активность, а готовность определяется
-        после стабилизации потока.
+        Панель останется открытой, пока вы выбираете фреймы на холсте. Для нового выбора нажмите
+        «Считать заново».
       </p>
 
       <div class="actions">

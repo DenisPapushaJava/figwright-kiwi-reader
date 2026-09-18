@@ -1,13 +1,17 @@
 {
   "manifest_version": 3,
   "name": "Figwright Kiwi Reader",
-  "version": "0.2.0",
+  "version": "0.3.0",
+  "minimum_chrome_version": "116",
   "description": "Read-only capture of the Figma scenegraph already delivered to this browser tab.",
-  "permissions": ["activeTab", "debugger", "tabs"],
+  "permissions": ["activeTab", "debugger", "sidePanel", "tabs"],
   "host_permissions": ["https://www.figma.com/*"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   },
   "icons": {
     "16": "icons/icon-16.png",
@@ -19,8 +23,8 @@
     "default_title": "Figwright Kiwi Reader",
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/icon-16.png",
-      "32": "icons/icon-32.png"
+      "16": "icons/toolbar-16.png",
+      "32": "icons/toolbar-32.png"
     }
   }
 }

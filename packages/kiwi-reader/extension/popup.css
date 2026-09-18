@@ -26,6 +26,17 @@ body {
   padding: 18px;
 }
 
+.side-panel {
+  width: auto;
+  min-width: 300px;
+  min-height: 100vh;
+}
+
+.side-panel .panel {
+  max-width: 460px;
+  margin: 0 auto;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -38,6 +49,34 @@ body {
   height: 38px;
   object-fit: contain;
   filter: drop-shadow(0 6px 8px rgb(22 34 63 / 18%));
+}
+
+.header-copy {
+  min-width: 0;
+}
+
+.pin-action {
+  width: 34px;
+  min-height: 34px;
+  flex: 0 0 34px;
+  margin-left: auto;
+  padding: 0;
+  color: #475467;
+  border: 1px solid #d8dee8;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 82%);
+}
+
+.pin-action:hover:not(:disabled) {
+  color: #2f6fed;
+  border-color: #9db9f5;
+  background: #f3f7ff;
+}
+
+.pin-action svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
 }
 
 h1,

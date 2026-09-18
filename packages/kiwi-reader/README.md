@@ -46,18 +46,19 @@ paints, effects, text and auto-layout fields already confirmed on live Kiwi traf
 `editInfo`, glyph caches and other private or high-volume wire fields. A response above the hard
 payload budget becomes a section plan so an agent can request individual child sections.
 
-Load `packages/kiwi-reader/extension` as an unpacked Chrome extension. After starting the probe or
-MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose **Подключить
-макет**. Chrome shows its normal debugger notification and the extension reloads the tab once so the
-initial scenegraph is observable.
+Load `packages/kiwi-reader/extension` as an unpacked extension in Chrome 116 or newer. After starting
+the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose
+**Подключить макет**. Chrome shows its normal debugger notification and the extension reloads the tab
+once so the initial scenegraph is observable.
 
 The popup reports the actual capture phase, file and selected node, decoded frame count, and number
 of nodes received. Its progress bar is intentionally indeterminate while capture is active: the
 Kiwi stream does not advertise a total node count from which an honest percentage could be
-calculated. The popup closes when Chrome reloads the Figma tab, so the action badge keeps the compact
-state: `…` while connecting, `SYNC` while nodes arrive, `✓` when the graph has settled, `WAIT` while
-reconnecting, and `ERR` on an actionable failure. Reopen the popup to see the current counters,
-recapture the file, or detach.
+calculated. Chrome always closes an action popup when it loses focus. Use the pin button in the
+popup to move the same controls into Chrome's persistent side panel while selecting frames on the
+canvas. The action badge keeps the compact state: `…` while connecting, `SYNC` while nodes arrive,
+`✓` when the graph has settled, `WAIT` while reconnecting, and `ERR` on an actionable failure.
+Reopen either surface to see the current counters, recapture the file, or detach.
 
 Failures include a stable diagnostic code such as `LOCAL_MCP_OFFLINE`, `DEBUGGER_ATTACH_FAILED`,
 `FIGMA_STREAM_TIMEOUT`, or `KIWI_DECODE_FAILED`. The popup can copy a compact diagnostic object with
