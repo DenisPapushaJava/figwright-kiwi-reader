@@ -193,9 +193,6 @@ importers:
 
   packages/kiwi-reader:
     dependencies:
-      '@figwright/shared':
-        specifier: workspace:*
-        version: link:../shared
       '@modelcontextprotocol/server':
         specifier: ^2.0.0
         version: 2.0.0
@@ -212,6 +209,9 @@ importers:
         specifier: ^4.6.5
         version: 4.6.5
     devDependencies:
+      '@figwright/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1

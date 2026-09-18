@@ -11,6 +11,8 @@ import { normalizeNodeId, type CapturedNode } from './scenegraph.js';
 const DEFAULT_MAX_NODES = 2_000;
 const DEFAULT_MAX_DEPTH = 12;
 const MAX_RESPONSE_CHARS = 1_500_000;
+const MAX_SECTION_PLAN_SECTIONS = 200;
+const MAX_SECTION_NAME_CHARS = 500;
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false } as const;
 
 const capture = new KiwiCaptureServer({
@@ -125,20 +127,41 @@ const projectNode = (node: SerializedNode, detail: DetailLevel): Record<string, 
 const countTree = (node: CapturedNode): number =>
   1 + node.children.reduce((sum, child) => sum + countTree(child), 0);
 
-const sectionPlan = (root: CapturedNode, reason: string) => ({
-  nodes: [{ id: root.id, name: root.name, type: root.type }],
-  sectionPlan: {
-    reason,
-    totalNodes: countTree(root),
-    sections: root.children.map(child => ({
+const boundedName = (name: string): { name: string; nameTruncated?: true } =>
+  name.length <= MAX_SECTION_NAME_CHARS
+    ? { name }
+    : { name: name.slice(0, MAX_SECTION_NAME_CHARS), nameTruncated: true };
+
+const sectionPlan = (root: CapturedNode, reason: string) => {
+  const sections = root.children.slice(0, MAX_SECTION_PLAN_SECTIONS).map(child => {
+    const bounded = boundedName(child.name);
+    const summary: {
+      nodeId: string;
+      name: string;
+      nameTruncated?: true;
+      type: string;
+      nodes: number;
+    } = {
       nodeId: child.id,
-      name: child.name,
+      name: bounded.name,
       type: child.type,
       nodes: countTree(child),
-    })),
-  },
-  note: 'Request each section nodeId with get_design_context at detail full.',
-});
+    };
+    if (bounded.nameTruncated === true) summary.nameTruncated = true;
+    return summary;
+  });
+  return {
+    nodes: [{ id: root.id, ...boundedName(root.name), type: root.type }],
+    sectionPlan: {
+      reason,
+      totalNodes: countTree(root),
+      sections,
+      sectionsTruncated: root.children.length > sections.length,
+      omittedSections: Math.max(0, root.children.length - sections.length),
+    },
+    note: 'Request each section nodeId with get_design_context at detail full.',
+  };
+};
 
 const createMcpServer = (): McpServer => {
   const server = new McpServer(

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { SceneGraphStore } from '../src/scenegraph.js';
+import { SceneGraphLimitError, SceneGraphStore } from '../src/scenegraph.js';
 
 describe('SceneGraphStore', () => {
   it('merges node changes and builds an ordered subtree', () => {
@@ -29,6 +29,34 @@ describe('SceneGraphStore', () => {
     expect(root?.children.map(child => child.name)).toEqual(['First', 'Second']);
   });
 
+  it('uses deterministic code-point ordering and exposes the parent stack direction', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 5, localID: 1 },
+          name: 'Root',
+          type: 'FRAME',
+          stackMode: 'VERTICAL',
+        },
+        {
+          guid: { sessionID: 5, localID: 2 },
+          parentIndex: { guid: { sessionID: 5, localID: 1 }, position: 'a' },
+          name: 'Lowercase',
+        },
+        {
+          guid: { sessionID: 5, localID: 3 },
+          parentIndex: { guid: { sessionID: 5, localID: 1 }, position: 'B' },
+          name: 'Uppercase',
+        },
+      ],
+    });
+
+    const root = graph.find('5:1');
+    expect(root?.children.map(child => child.name)).toEqual(['Uppercase', 'Lowercase']);
+    expect(root?.children.map(child => child.parentStackMode)).toEqual(['VERTICAL', 'VERTICAL']);
+  });
+
   it('applies partial updates and removals', () => {
     const graph = new SceneGraphStore();
     graph.apply({ nodeChanges: [{ guid: { sessionID: 2, localID: 4 }, name: 'Before' }] });
@@ -39,6 +67,20 @@ describe('SceneGraphStore', () => {
       nodeChanges: [{ guid: { sessionID: 2, localID: 4 }, phase: 'REMOVED' }],
     });
     expect(graph.find('2:4')).toBeNull();
+  });
+
+  it('rejects an oversized update before partially mutating the graph', () => {
+    const graph = new SceneGraphStore(2);
+    expect(() =>
+      graph.apply({
+        nodeChanges: [
+          { guid: { sessionID: 8, localID: 1 }, name: 'One' },
+          { guid: { sessionID: 8, localID: 2 }, name: 'Two' },
+          { guid: { sessionID: 8, localID: 3 }, name: 'Three' },
+        ],
+      }),
+    ).toThrow(SceneGraphLimitError);
+    expect(graph.size).toBe(0);
   });
 
   it('reports depth and node truncation instead of silently dropping descendants', () => {

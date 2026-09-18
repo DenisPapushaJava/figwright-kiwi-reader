@@ -260,7 +260,7 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
 const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
   const raw = node.raw as UnknownRecord;
   const size = record(raw.size);
-  const transform = record(raw.transform);
+  const transform = matrix(raw.transform);
   const output: SerializedNode = {
     id: node.id,
     name: node.name,
@@ -268,14 +268,14 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
     visible: node.visible,
     locked: typeof raw.locked === 'boolean' ? raw.locked : false,
     parentId: parentId(raw),
-    x: finiteNumber(transform?.m02 ?? raw.x) ?? 0,
-    y: finiteNumber(transform?.m12 ?? raw.y) ?? 0,
+    x: finiteNumber(transform?.[0]?.[2] ?? raw.x) ?? 0,
+    y: finiteNumber(transform?.[1]?.[2] ?? raw.y) ?? 0,
     width: finiteNumber(size?.x ?? raw.width) ?? 0,
     height: finiteNumber(size?.y ?? raw.height) ?? 0,
   };
 
-  const m00 = finiteNumber(transform?.m00);
-  const m10 = finiteNumber(transform?.m10);
+  const m00 = finiteNumber(transform?.[0]?.[0]);
+  const m10 = finiteNumber(transform?.[1]?.[0]);
   if (m00 !== undefined && m10 !== undefined) {
     const rotation = (Math.atan2(m10, m00) * 180) / Math.PI;
     if (Math.abs(rotation) > 0.000_001) output.rotation = rotation;
@@ -332,8 +332,18 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
   if (layout !== undefined) output.layout = layout;
   const primarySizing = nonEmptyString(raw.stackPrimarySizing);
   const counterSizing = nonEmptyString(raw.stackCounterSizing);
-  const sizingHorizontal = raw.stackMode === 'VERTICAL' ? counterSizing : primarySizing;
-  const sizingVertical = raw.stackMode === 'VERTICAL' ? primarySizing : counterSizing;
+  const sizingHorizontal =
+    node.parentStackMode === 'VERTICAL'
+      ? counterSizing
+      : node.parentStackMode === 'HORIZONTAL'
+        ? primarySizing
+        : undefined;
+  const sizingVertical =
+    node.parentStackMode === 'VERTICAL'
+      ? primarySizing
+      : node.parentStackMode === 'HORIZONTAL'
+        ? counterSizing
+        : undefined;
   const layoutAlign = nonEmptyString(raw.stackChildAlignSelf);
   const layoutPositioning = nonEmptyString(raw.stackPositioning);
   const layoutGrow = finiteNumber(raw.stackChildPrimaryGrow);
@@ -362,6 +372,21 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
   return output;
 };
 
+export class KiwiNormalizationError extends Error {
+  constructor(capturedNodeId: string, issues: readonly { path: PropertyKey[]; message: string }[]) {
+    const summary = issues
+      .slice(0, 5)
+      .map(issue => `${issue.path.join('.') || '<root>'}: ${issue.message}`)
+      .join('; ');
+    const suffix = issues.length > 5 ? `; ${issues.length - 5} more issue(s)` : '';
+    super(`Invalid normalized Kiwi node ${capturedNodeId}: ${summary}${suffix}`);
+    this.name = 'KiwiNormalizationError';
+  }
+}
+
 /** Convert a captured Kiwi subtree into Figwright's established, validated read contract. */
-export const normalizeCapturedNode = (node: CapturedNode): SerializedNode =>
-  SerializedNodeSchema.parse(normalizeNodeUnchecked(node));
+export const normalizeCapturedNode = (node: CapturedNode): SerializedNode => {
+  const result = SerializedNodeSchema.safeParse(normalizeNodeUnchecked(node));
+  if (!result.success) throw new KiwiNormalizationError(node.id, result.error.issues);
+  return result.data;
+};

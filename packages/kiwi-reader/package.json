@@ -11,7 +11,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@figwright/shared": "workspace:*",
     "@modelcontextprotocol/server": "^2.0.0",
     "fzstd": "^0.1.1",
     "kiwi-schema": "^0.5.0",
@@ -19,6 +18,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@figwright/shared": "workspace:*",
     "@types/ws": "^8.18.1",
     "tsdown": "^0.23.0"
   },

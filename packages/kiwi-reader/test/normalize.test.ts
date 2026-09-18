@@ -1,7 +1,7 @@
 import { SerializedNodeSchema } from '@figwright/shared';
 import { describe, expect, it } from 'vitest';
 
-import { normalizeCapturedNode } from '../src/normalize.js';
+import { KiwiNormalizationError, normalizeCapturedNode } from '../src/normalize.js';
 import type { CapturedNode } from '../src/scenegraph.js';
 
 describe('normalizeCapturedNode', () => {
@@ -115,5 +115,55 @@ describe('normalizeCapturedNode', () => {
     expect(node).not.toHaveProperty('blendMode');
     expect(node).not.toHaveProperty('cornerRadius');
     expect(node.children?.[0]).toMatchObject({ id: '3:2', visible: false, parentId: '3:1' });
+  });
+
+  it('maps child sizing against the parent axis and accepts array transforms', () => {
+    const node = normalizeCapturedNode({
+      id: '7:2',
+      name: 'Child',
+      type: 'FRAME',
+      visible: true,
+      parentStackMode: 'VERTICAL',
+      raw: {
+        guid: { sessionID: 7, localID: 2 },
+        transform: [
+          [0, -1, 120],
+          [1, 0, 240],
+        ],
+        stackMode: 'HORIZONTAL',
+        stackPrimarySizing: 'HUG',
+        stackCounterSizing: 'FILL',
+      },
+      children: [],
+    });
+
+    expect(node).toMatchObject({
+      x: 120,
+      y: 240,
+      rotation: 90,
+      layoutSizingHorizontal: 'FILL',
+      layoutSizingVertical: 'HUG',
+    });
+  });
+
+  it('reports a compact normalization error without serializing the raw node', () => {
+    const invalid = {
+      id: '9:9',
+      name: 42,
+      type: 'FRAME',
+      visible: true,
+      raw: { guid: { sessionID: 9, localID: 9 }, privatePayload: 'do-not-report' },
+      children: [],
+    } as unknown as CapturedNode;
+
+    expect(() => normalizeCapturedNode(invalid)).toThrow(KiwiNormalizationError);
+    expect(() => normalizeCapturedNode(invalid)).toThrow(/Invalid normalized Kiwi node 9:9: name/);
+    let capturedError: unknown;
+    try {
+      normalizeCapturedNode(invalid);
+    } catch (error) {
+      capturedError = error;
+    }
+    expect(String(capturedError)).not.toContain('do-not-report');
   });
 });

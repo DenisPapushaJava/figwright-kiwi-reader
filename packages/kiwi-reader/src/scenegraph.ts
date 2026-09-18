@@ -23,6 +23,7 @@ export interface CapturedNode {
   name: string;
   type: string;
   visible: boolean;
+  parentStackMode?: string;
   raw: KiwiNodeChange;
   children: CapturedNode[];
 }
@@ -32,6 +33,13 @@ export interface SceneGraphFindResult {
   visited: number;
   nodeLimitReached: boolean;
   depthLimitReached: boolean;
+}
+
+export class SceneGraphLimitError extends Error {
+  constructor(readonly maxNodes: number) {
+    super(`Captured scene graph exceeds the ${maxNodes} node limit`);
+    this.name = 'SceneGraphLimitError';
+  }
 }
 
 export const nodeId = (guid: KiwiGuid | undefined): string =>
@@ -47,6 +55,8 @@ const isRemoved = (node: KiwiNodeChange): boolean =>
 export class SceneGraphStore {
   private readonly nodes = new Map<string, KiwiNodeChange>();
 
+  constructor(private readonly maxNodes = 250_000) {}
+
   get size(): number {
     return this.nodes.size;
   }
@@ -57,6 +67,18 @@ export class SceneGraphStore {
 
   apply(message: unknown): number {
     if (!isMessage(message) || !Array.isArray(message.nodeChanges)) return 0;
+
+    let projectedSize = this.nodes.size;
+    const projectedPresence = new Map<string, boolean>();
+    for (const change of message.nodeChanges) {
+      if (typeof change !== 'object' || change === null || change.guid === undefined) continue;
+      const id = nodeId(change.guid);
+      const wasPresent = projectedPresence.get(id) ?? this.nodes.has(id);
+      const willBePresent = !isRemoved(change);
+      if (wasPresent !== willBePresent) projectedSize += willBePresent ? 1 : -1;
+      projectedPresence.set(id, willBePresent);
+    }
+    if (projectedSize > this.maxNodes) throw new SceneGraphLimitError(this.maxNodes);
 
     let applied = 0;
     for (const change of message.nodeChanges) {
@@ -92,7 +114,7 @@ export class SceneGraphStore {
       childIds.set(parentId, children);
     }
     for (const children of childIds.values()) {
-      children.sort((a, b) => a.position.localeCompare(b.position));
+      children.sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0));
     }
 
     let visited = 0;
@@ -114,11 +136,18 @@ export class SceneGraphStore {
           : directChildren
               .map(child => build(child.id, depth + 1))
               .filter((child): child is CapturedNode => child !== null);
+      const parentRaw =
+        raw.parentIndex?.guid === undefined
+          ? undefined
+          : this.nodes.get(nodeId(raw.parentIndex.guid));
       return {
         id: nodeIdValue,
         name: raw.name ?? '',
         type: raw.type ?? 'UNKNOWN',
         visible: raw.visible !== false,
+        ...(typeof parentRaw?.stackMode === 'string'
+          ? { parentStackMode: parentRaw.stackMode }
+          : {}),
         raw,
         children,
       };
