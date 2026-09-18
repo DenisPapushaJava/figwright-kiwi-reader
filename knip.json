@@ -11,6 +11,9 @@
     "packages/mcp": {
       "project": ["src/**/*.ts"]
     },
+    "packages/kiwi-reader": {
+      "project": ["src/**/*.ts"]
+    },
     "packages/plugin": {
       "project": ["protocol/**/*.ts", "src/**/*.ts", "ui/**/*.{ts,vue,css}"]
     }

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Figwright Kiwi Reader",
+  "version": "0.1.0",
+  "description": "Read-only capture of the Figma scenegraph already delivered to this browser tab.",
+  "permissions": ["activeTab", "debugger", "tabs"],
+  "host_permissions": ["https://www.figma.com/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Connect Figwright Kiwi Reader"
+  }
+}
