@@ -45,6 +45,19 @@ export interface CaptureStatus {
   sessions: readonly CaptureSessionStatus[];
 }
 
+interface CaptureStatusMessage {
+  type: 'capture-status';
+  session: CaptureSessionStatus;
+}
+
+interface CaptureErrorMessage {
+  type: 'capture-error';
+  tabId: number;
+  code: 'KIWI_DECODE_FAILED';
+  message: string;
+  session: CaptureSessionStatus;
+}
+
 export const parseFigmaLocation = (input: string): FigmaLocation | null => {
   try {
     const url = new URL(input);
@@ -87,6 +100,7 @@ export class KiwiCaptureSession {
   title: string | null;
   decodedFrames = 0;
   ignoredFrames = 0;
+  consecutiveDecodeFailures = 0;
   lastActivityAt = Date.now();
 
   constructor(
@@ -129,10 +143,18 @@ export class KiwiCaptureSession {
     this.lastActivityAt = Date.now();
     const decoded = this.decoder.ingestBase64(payload);
     if (decoded.kind === 'message') {
+      this.consecutiveDecodeFailures = 0;
       this.decodedFrames++;
       return this.graph.apply(decoded.message);
     }
-    if (decoded.kind === 'ignored') this.ignoredFrames++;
+    if (decoded.kind === 'schema') this.consecutiveDecodeFailures = 0;
+    if (decoded.kind === 'ignored') {
+      this.ignoredFrames++;
+      this.consecutiveDecodeFailures++;
+      if (decoded.source === 'schema' || this.consecutiveDecodeFailures >= 3) {
+        throw new Error(decoded.error);
+      }
+    }
     return 0;
   }
 
@@ -141,6 +163,7 @@ export class KiwiCaptureSession {
     this.decoder.reset();
     this.decodedFrames = 0;
     this.ignoredFrames = 0;
+    this.consecutiveDecodeFailures = 0;
   }
 }
 
@@ -250,23 +273,36 @@ export class KiwiCaptureServer extends EventEmitter {
         const location = parseFigmaLocation(message.url);
         if (location === null || !Number.isInteger(message.tabId)) return;
         const current = this.sessionMap.get(message.tabId);
-        if (current === undefined) {
-          this.sessionMap.set(
-            message.tabId,
-            new KiwiCaptureSession(message.tabId, message, location),
-          );
+        let session = current;
+        if (session === undefined) {
+          session = new KiwiCaptureSession(message.tabId, message, location);
+          this.sessionMap.set(message.tabId, session);
         } else {
-          current.updateHello(message, location);
+          session.updateHello(message, location);
         }
+        this.sendSessionStatus(socket, session);
         this.emit('status', this.status);
         return;
       }
 
       const session = this.sessionMap.get(message.tabId);
       if (session === undefined) return;
-      const applied = session.ingest(message.payload);
-      if (applied > 0) this.emit('update', session.status);
-      this.emit('status', this.status);
+      try {
+        const applied = session.ingest(message.payload);
+        if (applied > 0) this.emit('update', session.status);
+        this.sendSessionStatus(socket, session);
+        this.emit('status', this.status);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        const response: CaptureErrorMessage = {
+          type: 'capture-error',
+          tabId: session.tabId,
+          code: 'KIWI_DECODE_FAILED',
+          message: detail,
+          session: session.status,
+        };
+        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(response));
+      }
     });
 
     socket.on('close', () => {
@@ -275,5 +311,11 @@ export class KiwiCaptureServer extends EventEmitter {
       for (const session of this.sessionMap.values()) session.connected = false;
       this.emit('status', this.status);
     });
+  }
+
+  private sendSessionStatus(socket: WebSocket, session: KiwiCaptureSession): void {
+    if (socket.readyState !== socket.OPEN) return;
+    const message: CaptureStatusMessage = { type: 'capture-status', session: session.status };
+    socket.send(JSON.stringify(message));
   }
 }

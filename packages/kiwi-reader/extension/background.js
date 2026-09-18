@@ -1,15 +1,75 @@
 const BRIDGE_URL = 'ws://127.0.0.1:9224';
+const CAPTURE_TIMEOUT_MS = 20_000;
 const attachedTabs = new Set();
+const tabStates = new Map();
+const readyTimers = new Map();
+const captureTimers = new Map();
 let bridge = null;
 let connecting = null;
 let keepAlive = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
 
-const setBadge = async (tabId, text, color) => {
-  await chrome.action.setBadgeText({ tabId, text });
-  await chrome.action.setBadgeBackgroundColor({ tabId, color });
+const initialState = tabId => ({
+  tabId,
+  attached: false,
+  bridgeConnected: false,
+  phase: 'idle',
+  title: null,
+  fileKey: null,
+  selectedNodeId: null,
+  schemaReady: false,
+  nodes: 0,
+  decodedFrames: 0,
+  ignoredFrames: 0,
+  errorCode: null,
+  errorMessage: null,
+});
+
+const getState = tabId => tabStates.get(tabId) ?? initialState(tabId);
+
+const badgeForState = state => {
+  switch (state.phase) {
+    case 'ready':
+      return { text: '✓', color: '#16803c', title: 'Figwright: макет готов к чтению' };
+    case 'reading':
+      return { text: 'SYNC', color: '#2563eb', title: 'Figwright: чтение узлов Figma' };
+    case 'connecting':
+    case 'reloading':
+    case 'waiting':
+      return { text: '…', color: '#9a6700', title: 'Figwright: подключение к Figma' };
+    case 'reconnecting':
+      return { text: 'WAIT', color: '#9a6700', title: 'Figwright: локальный MCP недоступен' };
+    case 'error':
+      return {
+        text: 'ERR',
+        color: '#b42318',
+        title: `Figwright: ${state.errorCode ?? 'ошибка'}`,
+      };
+    default:
+      return { text: '', color: '#666666', title: 'Figwright Kiwi Reader' };
+  }
 };
+
+const publishState = async (tabId, patch = {}) => {
+  const state = { ...getState(tabId), ...patch, tabId };
+  tabStates.set(tabId, state);
+  const badge = badgeForState(state);
+  await Promise.all([
+    chrome.action.setBadgeText({ tabId, text: badge.text }),
+    chrome.action.setBadgeBackgroundColor({ tabId, color: badge.color }),
+    chrome.action.setTitle({ tabId, title: badge.title }),
+  ]);
+  void chrome.runtime.sendMessage({ type: 'kiwi-state', state }).catch(() => {});
+  return state;
+};
+
+const reportError = (tabId, errorCode, error) =>
+  publishState(tabId, {
+    phase: 'error',
+    errorCode,
+    errorMessage: error instanceof Error ? error.message : String(error),
+  });
 
 const send = message => {
   if (bridge?.readyState === WebSocket.OPEN) bridge.send(JSON.stringify(message));
@@ -19,6 +79,68 @@ const sendHello = async (tabId, reset = false) => {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.url?.startsWith('https://www.figma.com/')) return;
   send({ type: 'hello', tabId, url: tab.url, title: tab.title, reset });
+  await publishState(tabId, { title: tab.title ?? null });
+};
+
+const clearTimer = (timers, tabId) => {
+  clearTimeout(timers.get(tabId));
+  timers.delete(tabId);
+};
+
+const clearTabTimers = tabId => {
+  clearTimer(readyTimers, tabId);
+  clearTimer(captureTimers, tabId);
+};
+
+const scheduleReady = tabId => {
+  clearTimer(readyTimers, tabId);
+  readyTimers.set(
+    tabId,
+    setTimeout(() => {
+      readyTimers.delete(tabId);
+      if (attachedTabs.has(tabId)) void publishState(tabId, { phase: 'ready' });
+    }, 800),
+  );
+};
+
+const scheduleCaptureTimeout = tabId => {
+  clearTimer(captureTimers, tabId);
+  captureTimers.set(
+    tabId,
+    setTimeout(() => {
+      captureTimers.delete(tabId);
+      if (attachedTabs.has(tabId) && getState(tabId).nodes === 0) {
+        void reportError(
+          tabId,
+          'FIGMA_STREAM_TIMEOUT',
+          new Error('За 20 секунд Figma не передала структуру макета'),
+        );
+      }
+    }, CAPTURE_TIMEOUT_MS),
+  );
+};
+
+const applyCaptureStatus = session => {
+  if (!Number.isInteger(session?.tabId) || !attachedTabs.has(session.tabId)) return;
+  const phase = session.schemaReady && session.nodes > 0 ? 'reading' : 'waiting';
+  void publishState(session.tabId, {
+    attached: true,
+    bridgeConnected: true,
+    phase,
+    title: session.title,
+    fileKey: session.fileKey,
+    selectedNodeId: session.selectedNodeId,
+    schemaReady: session.schemaReady,
+    nodes: session.nodes,
+    decodedFrames: session.decodedFrames,
+    ignoredFrames: session.ignoredFrames,
+    errorCode: null,
+    errorMessage: null,
+  });
+  if (phase === 'reading') {
+    clearTimer(captureTimers, session.tabId);
+    scheduleReady(session.tabId);
+  }
 };
 
 const detachAll = async () => {
@@ -26,12 +148,13 @@ const detachAll = async () => {
   attachedTabs.clear();
   await Promise.all(
     tabIds.map(async tabId => {
+      clearTabTimers(tabId);
       try {
         await chrome.debugger.detach({ tabId });
       } catch {
         // The tab or debugger session may already be gone.
       }
-      await setBadge(tabId, '', '#666666');
+      await publishState(tabId, initialState(tabId));
     }),
   );
 };
@@ -50,14 +173,23 @@ const resyncAttachedTabs = async () => {
   await Promise.all(
     [...attachedTabs].map(async tabId => {
       try {
+        await publishState(tabId, {
+          bridgeConnected: true,
+          phase: 'reloading',
+          errorCode: null,
+          errorMessage: null,
+          schemaReady: false,
+          nodes: 0,
+          decodedFrames: 0,
+          ignoredFrames: 0,
+        });
         await sendHello(tabId, true);
-        await setBadge(tabId, 'SYNC', '#9a6700');
         await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
+        scheduleCaptureTimeout(tabId);
         await chrome.debugger.sendCommand({ tabId }, 'Page.reload', { ignoreCache: false });
-        await setBadge(tabId, 'ON', '#16803c');
       } catch (error) {
         console.error('[Figwright Kiwi Reader] reconnect', error);
-        await setBadge(tabId, 'ERR', '#b42318');
+        await reportError(tabId, 'CAPTURE_RESTART_FAILED', error);
       }
     }),
   );
@@ -79,9 +211,35 @@ const connectBridge = () => {
       if (reconnecting) void resyncAttachedTabs();
       resolve();
     });
+    socket.addEventListener('message', event => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'capture-status') applyCaptureStatus(message.session);
+        if (message.type === 'capture-error' && attachedTabs.has(message.tabId)) {
+          clearTabTimers(message.tabId);
+          void publishState(message.tabId, {
+            attached: true,
+            bridgeConnected: true,
+            phase: 'error',
+            title: message.session?.title ?? getState(message.tabId).title,
+            fileKey: message.session?.fileKey ?? getState(message.tabId).fileKey,
+            selectedNodeId:
+              message.session?.selectedNodeId ?? getState(message.tabId).selectedNodeId,
+            schemaReady: message.session?.schemaReady ?? false,
+            nodes: message.session?.nodes ?? 0,
+            decodedFrames: message.session?.decodedFrames ?? 0,
+            ignoredFrames: message.session?.ignoredFrames ?? 0,
+            errorCode: message.code,
+            errorMessage: message.message,
+          });
+        }
+      } catch {
+        // Ignore messages from incompatible bridge versions.
+      }
+    });
     socket.addEventListener('error', () => {
       connecting = null;
-      reject(new Error('Local Kiwi bridge is not running'));
+      reject(new Error('Локальный Kiwi MCP не отвечает на 127.0.0.1:9224'));
     });
     socket.addEventListener('close', event => {
       if (bridge === socket) bridge = null;
@@ -90,7 +248,15 @@ const connectBridge = () => {
       keepAlive = null;
       if (event.code === 1000) void detachAll();
       else {
-        for (const tabId of attachedTabs) void setBadge(tabId, 'WAIT', '#9a6700');
+        for (const tabId of attachedTabs) {
+          clearTabTimers(tabId);
+          void publishState(tabId, {
+            bridgeConnected: false,
+            phase: 'reconnecting',
+            errorCode: 'BRIDGE_CONNECTION_LOST',
+            errorMessage: 'Нет связи с локальным MCP',
+          });
+        }
         scheduleReconnect();
       }
     });
@@ -98,23 +264,63 @@ const connectBridge = () => {
   return connecting;
 };
 
+const reloadCapture = async tabId => {
+  clearTabTimers(tabId);
+  await publishState(tabId, {
+    phase: 'reloading',
+    errorCode: null,
+    errorMessage: null,
+    schemaReady: false,
+    nodes: 0,
+    decodedFrames: 0,
+    ignoredFrames: 0,
+  });
+  await sendHello(tabId, true);
+  await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
+  scheduleCaptureTimeout(tabId);
+  await chrome.debugger.sendCommand({ tabId }, 'Page.reload', { ignoreCache: false });
+};
+
 const attach = async tab => {
   if (!tab.id || !tab.url?.startsWith('https://www.figma.com/')) {
-    throw new Error('Open a Figma file in the active tab first');
+    throw Object.assign(new Error('Откройте макет Figma в активной вкладке'), {
+      code: 'NOT_FIGMA_TAB',
+    });
   }
-  await connectBridge();
-  await chrome.debugger.attach({ tabId: tab.id }, '1.3');
+  if (attachedTabs.has(tab.id)) {
+    await reloadCapture(tab.id);
+    return;
+  }
+  await publishState(tab.id, {
+    phase: 'connecting',
+    title: tab.title ?? null,
+    errorCode: null,
+    errorMessage: null,
+  });
+  try {
+    await connectBridge();
+  } catch (error) {
+    throw Object.assign(error, { code: 'LOCAL_MCP_OFFLINE' });
+  }
+  try {
+    await chrome.debugger.attach({ tabId: tab.id }, '1.3');
+  } catch (error) {
+    throw Object.assign(error, { code: 'DEBUGGER_ATTACH_FAILED' });
+  }
   attachedTabs.add(tab.id);
-  await sendHello(tab.id, true);
-  await chrome.debugger.sendCommand({ tabId: tab.id }, 'Network.enable');
-  await setBadge(tab.id, 'ON', '#16803c');
-  await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.reload', { ignoreCache: false });
+  await publishState(tab.id, { attached: true, bridgeConnected: true, phase: 'reloading' });
+  try {
+    await reloadCapture(tab.id);
+  } catch (error) {
+    throw Object.assign(error, { code: 'CAPTURE_START_FAILED' });
+  }
 };
 
 const detach = async tabId => {
+  clearTabTimers(tabId);
   if (attachedTabs.has(tabId)) await chrome.debugger.detach({ tabId });
   attachedTabs.delete(tabId);
-  await setBadge(tabId, '', '#666666');
+  await publishState(tabId, initialState(tabId));
   if (attachedTabs.size === 0) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -122,15 +328,33 @@ const detach = async tabId => {
   }
 };
 
-chrome.action.onClicked.addListener(async tab => {
-  if (!tab.id) return;
-  try {
-    if (attachedTabs.has(tab.id)) await detach(tab.id);
-    else await attach(tab);
-  } catch (error) {
-    console.error('[Figwright Kiwi Reader]', error);
-    await setBadge(tab.id, 'ERR', '#b42318');
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (!message || !['get-state', 'connect', 'recapture', 'disconnect'].includes(message.type)) {
+    return false;
   }
+
+  void (async () => {
+    const tabId = Number(message.tabId);
+    if (!Number.isInteger(tabId)) throw new Error('Не удалось определить вкладку');
+    if (message.type === 'get-state') return getState(tabId);
+    if (message.type === 'disconnect') {
+      await detach(tabId);
+      return getState(tabId);
+    }
+    const tab = await chrome.tabs.get(tabId);
+    if (message.type === 'connect') await attach(tab);
+    else if (attachedTabs.has(tabId)) await reloadCapture(tabId);
+    else await attach(tab);
+    return getState(tabId);
+  })()
+    .then(state => sendResponse({ ok: true, state }))
+    .catch(async error => {
+      const tabId = Number(message.tabId);
+      const code = typeof error?.code === 'string' ? error.code : 'UNEXPECTED_EXTENSION_ERROR';
+      if (Number.isInteger(tabId)) await reportError(tabId, code, error);
+      sendResponse({ ok: false, error: error.message, code });
+    });
+  return true;
 });
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
@@ -142,11 +366,18 @@ chrome.debugger.onEvent.addListener((source, method, params) => {
 
 chrome.debugger.onDetach.addListener(source => {
   if (!source.tabId) return;
+  clearTabTimers(source.tabId);
   attachedTabs.delete(source.tabId);
-  void setBadge(source.tabId, '', '#666666');
+  void publishState(source.tabId, initialState(source.tabId));
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (!attachedTabs.has(tabId) || changeInfo.url === undefined) return;
   void sendHello(tabId);
+});
+
+chrome.tabs.onRemoved.addListener(tabId => {
+  clearTabTimers(tabId);
+  attachedTabs.delete(tabId);
+  tabStates.delete(tabId);
 });

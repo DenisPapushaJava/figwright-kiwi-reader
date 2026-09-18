@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Figwright Kiwi Reader</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <header class="header">
+        <img src="icons/icon-32.png" width="36" height="36" alt="" />
+        <div>
+          <h1>Figwright Reader</h1>
+          <p>Figma → Codex, только чтение</p>
+        </div>
+      </header>
+
+      <section class="status-card" aria-live="polite">
+        <div class="status-heading">
+          <span id="status-dot" class="status-dot"></span>
+          <div>
+            <strong id="status-title">Проверяю состояние…</strong>
+            <p id="status-detail">Связываюсь с расширением</p>
+          </div>
+        </div>
+        <div id="progress" class="progress" role="progressbar" aria-label="Состояние чтения">
+          <span></span>
+        </div>
+      </section>
+
+      <section id="error-card" class="error-card" hidden>
+        <div>
+          <span>Код ошибки</span>
+          <code id="error-code">UNKNOWN</code>
+        </div>
+        <button id="copy-diagnostics" type="button">Копировать диагностику</button>
+      </section>
+
+      <section class="file-card">
+        <div class="file-label">Текущий макет</div>
+        <strong id="file-title">Не выбран</strong>
+        <div class="node-row">
+          <span>Выбранный узел</span>
+          <code id="node-id">—</code>
+        </div>
+      </section>
+
+      <section class="stats" aria-label="Статистика чтения">
+        <div>
+          <span id="node-count">0</span>
+          <small>узлов получено</small>
+        </div>
+        <div>
+          <span id="frame-count">0</span>
+          <small>кадров декодировано</small>
+        </div>
+      </section>
+
+      <p class="hint">
+        Общий размер заранее неизвестен: полоса показывает активность, а готовность определяется
+        после стабилизации потока.
+      </p>
+
+      <div class="actions">
+        <button id="primary-action" class="primary" type="button">Подключить макет</button>
+        <button id="disconnect-action" class="secondary" type="button" hidden>Отключить</button>
+      </div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

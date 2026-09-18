@@ -53,4 +53,15 @@ describe('Kiwi wire detection', () => {
       message: { nodeChanges: [{ guid: { sessionID: 6, localID: 140 }, name: 'Target' }] },
     });
   });
+
+  it('identifies an incompatible schema frame', () => {
+    const frame = new Uint8Array(16);
+    frame.set(new TextEncoder().encode('fig-wire'));
+    frame.set([1, 2, 3, 4], 12);
+
+    expect(new KiwiWireDecoder().ingest(frame)).toMatchObject({
+      kind: 'ignored',
+      source: 'schema',
+    });
+  });
 });

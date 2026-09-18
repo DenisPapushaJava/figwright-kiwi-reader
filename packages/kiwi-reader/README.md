@@ -46,14 +46,27 @@ paints, effects, text and auto-layout fields already confirmed on live Kiwi traf
 `editInfo`, glyph caches and other private or high-volume wire fields. A response above the hard
 payload budget becomes a section plan so an agent can request individual child sections.
 
-Load `packages/kiwi-reader/extension` as an unpacked Chrome extension. After starting the probe,
-activate the target Figma tab and click **Figwright Kiwi Reader**. Chrome shows its normal debugger
-notification and the extension reloads the tab once so the initial scenegraph is observable.
+Load `packages/kiwi-reader/extension` as an unpacked Chrome extension. After starting the probe or
+MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose **Подключить
+макет**. Chrome shows its normal debugger notification and the extension reloads the tab once so the
+initial scenegraph is observable.
 
-The action is a toggle: click it again to detach. An unexpected bridge restart triggers bounded
-reconnect attempts and a `WAIT` badge; after reconnect the extension reloads attached tabs once to
-recover each session's dynamic Kiwi schema. A clean bridge shutdown detaches the debugger and clears
-the badge.
+The popup reports the actual capture phase, file and selected node, decoded frame count, and number
+of nodes received. Its progress bar is intentionally indeterminate while capture is active: the
+Kiwi stream does not advertise a total node count from which an honest percentage could be
+calculated. The popup closes when Chrome reloads the Figma tab, so the action badge keeps the compact
+state: `…` while connecting, `SYNC` while nodes arrive, `✓` when the graph has settled, `WAIT` while
+reconnecting, and `ERR` on an actionable failure. Reopen the popup to see the current counters,
+recapture the file, or detach.
+
+Failures include a stable diagnostic code such as `LOCAL_MCP_OFFLINE`, `DEBUGGER_ATTACH_FAILED`,
+`FIGMA_STREAM_TIMEOUT`, or `KIWI_DECODE_FAILED`. The popup can copy a compact diagnostic object with
+the code, capture phase, file/node identifiers and counters; it deliberately excludes cookies,
+tokens, frame payloads and design content.
+
+An unexpected bridge restart triggers bounded reconnect attempts; after reconnect the extension
+reloads attached tabs once to recover each session's dynamic Kiwi schema. A clean bridge shutdown
+detaches the debugger and clears the badge.
 
 ## Security boundary
 

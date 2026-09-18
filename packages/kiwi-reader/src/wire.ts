@@ -12,7 +12,7 @@ export type DecodeResult =
   | { kind: 'schema' }
   | { kind: 'message'; message: unknown }
   | { kind: 'waiting-for-schema' }
-  | { kind: 'ignored'; error: string };
+  | { kind: 'ignored'; error: string; source: 'schema' | 'message' };
 
 const startsWith = (input: Uint8Array, prefix: Uint8Array): boolean =>
   prefix.every((byte, index) => input[index] === byte);
@@ -49,8 +49,9 @@ export class KiwiWireDecoder {
   }
 
   ingest(input: Uint8Array): DecodeResult {
+    const source = isFigWireFrame(input) ? 'schema' : 'message';
     try {
-      if (isFigWireFrame(input)) {
+      if (source === 'schema') {
         const compressedSchema = input.subarray(12);
         const schemaBytes = decompress(compressedSchema);
         const schema = decodeBinarySchema(schemaBytes);
@@ -63,7 +64,11 @@ export class KiwiWireDecoder {
       const bytes = isZstdFrame(input) ? decompress(input) : input;
       return { kind: 'message', message: this.codec.decodeMessage(bytes) };
     } catch (error) {
-      return { kind: 'ignored', error: error instanceof Error ? error.message : String(error) };
+      return {
+        kind: 'ignored',
+        error: error instanceof Error ? error.message : String(error),
+        source,
+      };
     }
   }
 }

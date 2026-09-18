@@ -7,6 +7,8 @@ import { WebSocket } from 'ws';
 import { KiwiCaptureServer, parseFigmaLocation } from '../src/capture-server.js';
 
 const servers: KiwiCaptureServer[] = [];
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(server => server.stop()));
@@ -74,6 +76,16 @@ describe('KiwiCaptureServer', () => {
       socket.once('error', reject);
     });
 
+    const progressReady = new Promise<Record<string, unknown>>(resolve => {
+      socket.on('message', data => {
+        const message: unknown = JSON.parse(data.toString());
+        if (!isRecord(message) || message.type !== 'capture-status') return;
+        const session = message.session;
+        if (!isRecord(session) || session.nodes !== 1) return;
+        resolve(message);
+      });
+    });
+
     socket.send(
       JSON.stringify({
         type: 'hello',
@@ -98,6 +110,17 @@ describe('KiwiCaptureServer', () => {
     );
 
     await server.waitForNode('6:140', 2_000, 'file');
+    await expect(progressReady).resolves.toMatchObject({
+      type: 'capture-status',
+      session: {
+        tabId: 17,
+        fileKey: 'file',
+        selectedNodeId: '6:140',
+        schemaReady: true,
+        nodes: 1,
+        decodedFrames: 1,
+      },
+    });
     expect(server.findNode('6:140', 'file')).toMatchObject({
       id: '6:140',
       name: 'Business',
@@ -170,6 +193,54 @@ describe('KiwiCaptureServer', () => {
     expect(server.sessions.map(session => session.fileKey).toSorted()).toEqual(['first', 'second']);
     expect(server.sessionForFile('first')?.selectedNodeId).toBe('1:1');
     expect(server.sessionForFile('second')?.selectedNodeId).toBe('2:2');
+    socket.close();
+  });
+
+  it('reports an incompatible Kiwi schema to the extension', async () => {
+    const server = new KiwiCaptureServer({ port: 0 });
+    servers.push(server);
+    const port = await server.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}`, {
+      origin: 'chrome-extension://figwright-test',
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.once('open', resolve);
+      socket.once('error', reject);
+    });
+
+    const errorReady = new Promise<Record<string, unknown>>(resolve => {
+      socket.on('message', data => {
+        const message: unknown = JSON.parse(data.toString());
+        if (isRecord(message) && message.type === 'capture-error') resolve(message);
+      });
+    });
+    socket.send(
+      JSON.stringify({
+        type: 'hello',
+        tabId: 17,
+        url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+      }),
+    );
+    const invalidSchema = new Uint8Array(16);
+    invalidSchema.set(new TextEncoder().encode('fig-wire'));
+    invalidSchema.set([1, 2, 3, 4], 12);
+    socket.send(
+      JSON.stringify({
+        type: 'frame',
+        tabId: 17,
+        payload: Buffer.from(invalidSchema).toString('base64'),
+      }),
+    );
+
+    await expect(errorReady).resolves.toMatchObject({
+      type: 'capture-error',
+      tabId: 17,
+      code: 'KIWI_DECODE_FAILED',
+      session: {
+        fileKey: 'file',
+        ignoredFrames: 1,
+      },
+    });
     socket.close();
   });
 });
