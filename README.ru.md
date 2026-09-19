@@ -79,6 +79,24 @@ corepack pnpm package:kiwi
 Готовая папка появится в `artifacts\figwright-kiwi-reader`. Сервер собирается вместе с runtime-
 зависимостями, поэтому на другом ПК для запуска нужен Node.js 24, но не нужны pnpm и `node_modules`.
 
+## Работа с изменениями
+
+Каждая отдельная функция, ошибка или правка документации выполняется в собственной ветке и
+попадает в `main` только через Pull Request:
+
+```powershell
+git switch main
+git pull --ff-only origin main
+git switch -c feat/short-name # либо fix/..., docs/...
+# внести изменения и выполнить проверки
+git push -u origin HEAD
+```
+
+Один PR должен решать одну логическую задачу. Заголовок PR оформляется как Conventional Commit,
+например `fix(tools): recapture raster bodies without browser cache`. После успешного CI используется
+**Squash and merge**. Прямые коммиты и push в `main` для обычной разработки запрещены; исключение —
+только документированный release-коммит, создаваемый `pnpm release`.
+
 ## Релизный цикл
 
 Kiwi Reader выпускается независимо от основного Figwright:

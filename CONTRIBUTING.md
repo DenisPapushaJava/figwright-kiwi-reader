@@ -30,6 +30,18 @@ To run your local build end-to-end, point your MCP client at the built server an
 
 ## Development workflow
 
+All repository changes use a branch and pull request:
+
+1. Update `main` and create a dedicated branch named for the change, such as
+   `feat/browser-assets`, `fix/raster-cache`, or `docs/release-guide`.
+2. Keep one logical feature or fix in the branch. Split unrelated work into another branch and PR.
+3. Run the required checks locally, push the branch, and open a PR into `main`.
+4. Merge only after CI is green. Use **Squash and merge** so the validated PR title becomes the
+   Conventional Commit on `main`.
+
+Do not commit or push routine development work directly to `main`. The release commit and tag
+created by the documented `pnpm release` flow are the only standing exception.
+
 The canonical checks (the same gates CI enforces on every push and PR) run from the repo root:
 
 ```bash
@@ -47,7 +59,8 @@ A few things worth knowing (full details in [AGENTS.md](./AGENTS.md)):
 
 - **[Conventional Commits](https://www.conventionalcommits.org/)**: `type(scope): subject`. The version bump and the changelog are derived from these.
 - **PR titles are validated** (`semantic-pr.yml`) and must follow the same format. PRs are **squash-merged** and the PR title becomes the commit on `main`, so write it carefully.
-- **Branch off `main`**, keep PRs focused, and make sure CI is green before requesting review.
+- **Branch off `main`**, keep PRs focused, and make sure CI is green before requesting review. A
+  routine change is never merged by pushing it directly to `main`.
 
 ### Type
 
