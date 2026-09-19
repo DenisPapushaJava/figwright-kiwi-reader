@@ -115,15 +115,17 @@ jobs:
             echo "$url"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Events created with GITHUB_TOKEN do not recursively start ordinary PR workflows.
-      # workflow_dispatch is the supported exception, so dispatch the same required checks
-      # against the generated commit explicitly.
-      - name: Start required checks
+      # A workflow_dispatch job check is not associated with a pull request and cannot
+      # satisfy a required status check. semantic-pr.yml therefore publishes an explicit
+      # `validate` check run for this branch head after validating the generated title.
+      - name: Report the generated title check
         env:
-          BRANCH: ${{ steps.version.outputs.branch }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TITLE: ${{ steps.version.outputs.title }}
         shell: bash
         run: |
-          gh workflow run ci.yml --ref "$BRANCH"
-          gh workflow run semantic-pr.yml --ref "$BRANCH" -f title="$TITLE"
+          head_sha=$(git rev-parse HEAD)
+          gh workflow run semantic-pr.yml \
+            --ref main \
+            -f title="$TITLE" \
+            -f head_sha="$head_sha"
