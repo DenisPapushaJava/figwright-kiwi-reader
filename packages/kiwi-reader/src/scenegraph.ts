@@ -29,7 +29,10 @@ export interface CapturedNode {
     id: string;
     name: string;
     key: string;
+    componentSetId?: string;
+    componentSetName?: string;
   };
+  componentProperties?: Readonly<Record<string, { type: string; value: string | boolean }>>;
   raw: KiwiNodeChange;
   children: CapturedNode[];
 }
@@ -68,6 +71,7 @@ interface InstanceOverrideContext {
   fullPath: string[];
   overrides: Map<string, UnknownRecord>;
   textAssignments: Map<string, string>;
+  booleanAssignments: Map<string, boolean>;
   resolutionTrail: Set<string>;
 }
 
@@ -252,6 +256,41 @@ const inheritedTextAssignments = (
   return assignments;
 };
 
+const readBooleanAssignment = (assignment: UnknownRecord): boolean | null => {
+  const direct = record(assignment.value)?.boolValue;
+  if (typeof direct === 'boolean') return direct;
+  const resolved = record(record(assignment.varValue)?.value)?.boolValue;
+  return typeof resolved === 'boolean' ? resolved : null;
+};
+
+const booleanAssignments = (raw: KiwiNodeChange): Map<string, boolean> => {
+  const assignmentEntries = record(raw.componentPropAssignments)?.entries;
+  const source: unknown[] = Array.isArray(raw.componentPropAssignments)
+    ? raw.componentPropAssignments
+    : Array.isArray(assignmentEntries)
+      ? assignmentEntries
+      : [];
+  const assignments = new Map<string, boolean>();
+  for (const value of source) {
+    const assignment = record(value);
+    if (assignment === null) continue;
+    const definitionId = guidId(assignment.defID ?? assignment.defId);
+    const visible = readBooleanAssignment(assignment);
+    if (definitionId !== null && visible !== null) assignments.set(definitionId, visible);
+  }
+  return assignments;
+};
+
+const inheritedBooleanAssignments = (
+  raw: KiwiNodeChange,
+  inherited: ReadonlyMap<string, boolean> | undefined,
+): Map<string, boolean> => {
+  const assignments = booleanAssignments(raw);
+  if (inherited === undefined) return assignments;
+  for (const [definitionId, visible] of inherited) assignments.set(definitionId, visible);
+  return assignments;
+};
+
 const assignedText = (
   raw: KiwiNodeChange,
   assignments: ReadonlyMap<string, string>,
@@ -284,6 +323,67 @@ const applyTextAssignment = (
     ...raw,
     textData: { ...record(raw.textData), characters },
   };
+};
+
+const applyBooleanAssignment = (
+  raw: KiwiNodeChange,
+  assignments: ReadonlyMap<string, boolean>,
+): KiwiNodeChange => {
+  const refs = Array.isArray(raw.componentPropRefs)
+    ? raw.componentPropRefs
+    : Array.isArray(raw.componentPropRef)
+      ? raw.componentPropRef
+      : [];
+  for (const value of refs) {
+    const ref = record(value);
+    if (ref?.componentPropNodeField !== 'VISIBLE') continue;
+    const definitionId = guidId(ref.defID ?? ref.defId);
+    const visible = definitionId === null ? undefined : assignments.get(definitionId);
+    if (visible !== undefined) {
+      return { ...raw, visible };
+    }
+  }
+  return raw;
+};
+
+const valueCounts = (values: readonly string[]): Map<string, number> => {
+  const result = new Map<string, number>();
+  for (const value of values) result.set(value, (result.get(value) ?? 0) + 1);
+  return result;
+};
+
+const variantProperties = (
+  master: KiwiNodeChange,
+): Record<string, { type: 'VARIANT'; value: string }> | undefined => {
+  if (!Array.isArray(master.variantPropSpecs) || master.variantPropSpecs.length === 0) {
+    return undefined;
+  }
+  const expectedValues = master.variantPropSpecs.flatMap(value => {
+    const spec = record(value);
+    return typeof spec?.value === 'string' ? [spec.value] : [];
+  });
+  if (expectedValues.length !== master.variantPropSpecs.length || typeof master.name !== 'string') {
+    return undefined;
+  }
+  const properties: Record<string, { type: 'VARIANT'; value: string }> = {};
+  for (const segment of master.name.split(',')) {
+    const separator = segment.indexOf('=');
+    if (separator < 1) return undefined;
+    const name = segment.slice(0, separator).trim();
+    const value = segment.slice(separator + 1).trim();
+    if (name === '' || value === '' || properties[name] !== undefined) return undefined;
+    properties[name] = { type: 'VARIANT', value };
+  }
+  const actualValues = Object.values(properties).map(property => property.value);
+  const expectedCounts = valueCounts(expectedValues);
+  const actualCounts = valueCounts(actualValues);
+  if (
+    actualValues.length !== expectedValues.length ||
+    [...expectedCounts].some(([value, count]) => actualCounts.get(value) !== count)
+  ) {
+    return undefined;
+  }
+  return properties;
 };
 
 const instanceMasterId = (raw: KiwiNodeChange): string | null => {
@@ -392,7 +492,12 @@ export class SceneGraphStore {
       const segment = overrideSegment(sourceRaw, sourceId);
       const fullPath = context === undefined ? [] : [...context.fullPath, segment];
       let raw =
-        context === undefined ? sourceRaw : applyTextAssignment(sourceRaw, context.textAssignments);
+        context === undefined
+          ? sourceRaw
+          : applyBooleanAssignment(
+              applyTextAssignment(sourceRaw, context.textAssignments),
+              context.booleanAssignments,
+            );
       const override =
         context === undefined ? null : findOverride(context.overrides, context.prefix, fullPath);
       if (override !== null) raw = mergeRecords(raw, override) as KiwiNodeChange;
@@ -401,6 +506,7 @@ export class SceneGraphStore {
       let sourceChildren = directChildren;
       let childContext = context === undefined ? undefined : { ...context, fullPath };
       let mainComponent: CapturedNode['mainComponent'];
+      let componentProperties: CapturedNode['componentProperties'];
 
       if (raw.type === 'INSTANCE' && directChildren.length === 0) {
         const masterId = instanceMasterId(raw);
@@ -413,6 +519,11 @@ export class SceneGraphStore {
             instanceCycles++;
           } else {
             resolvedInstances++;
+            componentProperties = variantProperties(master);
+            const componentSetId =
+              master.parentIndex?.guid === undefined ? null : nodeId(master.parentIndex.guid);
+            const componentSet =
+              componentSetId === null ? undefined : this.nodes.get(componentSetId);
             mainComponent = {
               id: masterId,
               name: master.name ?? '',
@@ -424,6 +535,13 @@ export class SceneGraphStore {
                     : typeof master.originComponentKey === 'string'
                       ? master.originComponentKey
                       : '',
+              ...(componentProperties !== undefined &&
+              componentSetId !== null &&
+              componentSet !== undefined &&
+              typeof componentSet.componentKey === 'string' &&
+              componentSet.componentKey !== ''
+                ? { componentSetId, componentSetName: componentSet.name ?? '' }
+                : {}),
             };
             sourceChildren = childIds.get(masterId) ?? [];
             const inheritedOverrides = new Map(context?.overrides ?? []);
@@ -439,6 +557,7 @@ export class SceneGraphStore {
               // each nested master carries its own default. Keep both scopes and let the placed
               // instance win, otherwise expansion silently falls back to labels such as "Action".
               textAssignments: inheritedTextAssignments(raw, context?.textAssignments),
+              booleanAssignments: inheritedBooleanAssignments(raw, context?.booleanAssignments),
               resolutionTrail: new Set([...(context?.resolutionTrail ?? []), masterId]),
             };
           }
@@ -478,6 +597,7 @@ export class SceneGraphStore {
         visible: raw.visible !== false,
         ...(resolvedParentId === undefined ? {} : { resolvedParentId }),
         ...(mainComponent === undefined ? {} : { mainComponent }),
+        ...(componentProperties === undefined ? {} : { componentProperties }),
         ...(typeof (parentStackMode ?? parentRaw?.stackMode) === 'string'
           ? { parentStackMode: (parentStackMode ?? parentRaw?.stackMode) as string }
           : {}),

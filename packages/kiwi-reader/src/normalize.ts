@@ -431,6 +431,9 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
   const styleIds = normalizeStyleIds(raw);
   if (styleIds !== undefined) output.styleIds = styleIds;
   if (node.mainComponent !== undefined) output.mainComponent = node.mainComponent;
+  if (node.componentProperties !== undefined) {
+    output.componentProperties = node.componentProperties;
+  }
   normalizeText(raw, output);
 
   if (node.children.length > 0) output.children = node.children.map(normalizeNodeUnchecked);
