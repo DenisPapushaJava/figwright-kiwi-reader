@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -25,11 +25,16 @@ const captureFixture = (large = false) => {
       Guid guid = 1;
       string position = 2;
     }
+    message SymbolData {
+      Guid symbolID = 1;
+    }
     message NodeChange {
       Guid guid = 1;
       string name = 2;
       string type = 3;
       ParentIndex parentIndex = 4;
+      SymbolData symbolData = 5;
+      string componentKey = 6;
     }
     message Message {
       NodeChange[] nodeChanges = 1;
@@ -59,17 +64,35 @@ const captureFixture = (large = false) => {
           type: 'TEXT',
           parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
         },
+        {
+          guid: { sessionID: 6, localID: 142 },
+          name: 'Button instance',
+          type: 'INSTANCE',
+          parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+          symbolData: { symbolID: { sessionID: 9, localID: 1 } },
+        },
+      ];
+  const masters = large
+    ? []
+    : [
+        {
+          guid: { sessionID: 9, localID: 1 },
+          name: 'Button',
+          type: 'SYMBOL',
+          componentKey: 'button-key',
+        },
       ];
   const messageFrame = zstdCompressSync(
     codec.encodeMessage({
       nodeChanges: [
         { guid: { sessionID: 6, localID: 140 }, name: 'Root', type: 'FRAME' },
+        ...masters,
         ...children,
       ],
     }),
   );
   return {
-    expectedNodes: children.length + 1,
+    expectedNodes: children.length + masters.length + 1,
     schemaPayload: Buffer.from(schemaFrame).toString('base64'),
     messagePayload: Buffer.from(messageFrame).toString('base64'),
   };
@@ -104,6 +127,23 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
     const pending = new Map<number, (value: Record<string, unknown>) => void>();
     let extensionSocket: WebSocket | null = null;
     const assetDirectory = await mkdtemp(join(tmpdir(), 'figwright-kiwi-wire-assets-'));
+    await Promise.all([
+      writeFile(
+        join(assetDirectory, 'package.json'),
+        JSON.stringify({ dependencies: { react: '^19.0.0' } }),
+        'utf8',
+      ),
+      writeFile(
+        join(assetDirectory, 'Button.tsx'),
+        'export const Button = () => <button />;\n',
+        'utf8',
+      ),
+      writeFile(
+        join(assetDirectory, 'search.svg'),
+        '<svg><path fill="currentColor" d="M0 0h1v1H0z"/></svg>',
+        'utf8',
+      ),
+    ]);
     child.stderr.on('data', (data: Buffer) => {
       stderr += data.toString('utf8');
     });
@@ -161,6 +201,10 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         'get_selection',
         'get_node',
         'get_design_context',
+        'analyze_project',
+        'scan_components',
+        'component_map',
+        'icon_map',
         'save_assets',
         'capture_reference',
         'compare_screenshots',
@@ -176,6 +220,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         extensionSocket?.once('open', resolve);
         extensionSocket?.once('error', reject);
       });
+      const fixture = captureFixture();
       const ready = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error('Timed out waiting for captured nodes')),
@@ -186,13 +231,15 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
             type?: string;
             session?: { nodes?: number };
           };
-          if (message.type === 'capture-status' && message.session?.nodes === 2) {
+          if (
+            message.type === 'capture-status' &&
+            message.session?.nodes === fixture.expectedNodes
+          ) {
             clearTimeout(timeout);
             resolve();
           }
         });
       });
-      const fixture = captureFixture();
       extensionSocket.send(
         JSON.stringify({
           type: 'hello',
@@ -240,7 +287,19 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       );
       expect(context).toMatchObject({
         schemaVersion: 'figwright-kiwi-context@1',
-        nodes: [{ id: '6:140', children: [{ id: '6:141', name: 'Child' }] }],
+        nodes: [
+          {
+            id: '6:140',
+            children: [
+              { id: '6:141', name: 'Child' },
+              {
+                id: '6:142',
+                name: 'Button instance',
+                mainComponent: { id: '9:1', name: 'Button', key: 'button-key' },
+              },
+            ],
+          },
+        ],
         capture: { provider: 'kiwi-browser', fileKey: 'file', tabId: 17, truncated: false },
         capabilities: {
           vectorAssets: 'not-present',
@@ -249,6 +308,53 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         },
         assets: { summary: { vectors: 0, images: 0 } },
       });
+
+      const analyzed = parseToolText(
+        await send('tools/call', {
+          name: 'analyze_project',
+          arguments: { rootDir: assetDirectory },
+        }),
+      );
+      expect(analyzed).toMatchObject({
+        framework: 'react',
+        scanMode: 'portable-name-only',
+      });
+
+      const scanned = parseToolText(
+        await send('tools/call', {
+          name: 'scan_components',
+          arguments: { rootDir: assetDirectory },
+        }),
+      );
+      expect(scanned).toMatchObject({
+        scanMode: 'portable-name-only',
+        components: [{ name: 'Button', filePath: 'Button.tsx', propsExtracted: false }],
+      });
+
+      const componentMap = parseToolText(
+        await send('tools/call', {
+          name: 'component_map',
+          arguments: { nodeId: '6:140', rootDir: assetDirectory },
+        }),
+      );
+      expect(componentMap).toMatchObject({
+        scannedComponentCount: 1,
+        mappings: [
+          {
+            figmaComponentName: 'Button',
+            status: 'high',
+            candidate: { name: 'Button', filePath: 'Button.tsx', confidence: 1 },
+          },
+        ],
+      });
+
+      const iconMap = parseToolText(
+        await send('tools/call', {
+          name: 'icon_map',
+          arguments: { nodeId: '6:140', rootDir: assetDirectory },
+        }),
+      );
+      expect(iconMap).toMatchObject({ mappings: [], svgFileCount: 1 });
 
       const saved = parseToolText(
         await send('tools/call', {
@@ -492,6 +598,9 @@ describe.skipIf(!existsSync(HUB_ENTRY))('Kiwi shared MCP hub (built dist)', () =
         tools: Array<{ name: string; inputSchema: unknown }>;
       };
       expect(listedResult.tools.map(tool => tool.name)).not.toContain('use_file');
+      expect(listedResult.tools.map(tool => tool.name)).toEqual(
+        expect.arrayContaining(['analyze_project', 'scan_components', 'component_map', 'icon_map']),
+      );
       expect(listedResult.tools.find(tool => tool.name === 'get_selection')).toMatchObject({
         inputSchema: {
           properties: { tabId: { type: 'integer' }, fileKey: { type: 'string' } },
@@ -517,7 +626,8 @@ describe.skipIf(!existsSync(HUB_ENTRY))('Kiwi shared MCP hub (built dist)', () =
             type?: string;
             session?: { tabId?: number; nodes?: number };
           };
-          if (message.type !== 'capture-status' || message.session?.nodes !== 2) return;
+          if (message.type !== 'capture-status' || message.session?.nodes !== fixture.expectedNodes)
+            return;
           if (message.session.tabId !== undefined) capturedTabs.add(message.session.tabId);
           if (capturedTabs.size !== 2) return;
           clearTimeout(timeout);

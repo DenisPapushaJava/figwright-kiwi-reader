@@ -196,9 +196,15 @@ importers:
       '@modelcontextprotocol/server':
         specifier: ^2.0.0
         version: 2.0.0
+      fdir:
+        specifier: ^6.5.0
+        version: 6.5.0(picomatch@4.0.7)
       fzstd:
         specifier: ^0.1.1
         version: 0.1.1
+      ignore:
+        specifier: ^7.0.9
+        version: 7.0.9
       kiwi-schema:
         specifier: ^0.5.0
         version: 0.5.0

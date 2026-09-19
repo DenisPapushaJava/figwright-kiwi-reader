@@ -1,4 +1,9 @@
-import type { DetailLevel, SerializedNode } from '@figwright/shared';
+import {
+  DesignContextNodeSchema,
+  type DesignContextNode,
+  type DetailLevel,
+  type SerializedNode,
+} from '@figwright/shared';
 import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
@@ -11,6 +16,12 @@ import {
 import { KiwiCaptureServer, type KiwiCaptureSession } from './capture-server.js';
 import { normalizeCapturedNode } from './normalize.js';
 import { comparePngFiles } from './png-diff.js';
+import {
+  analyzePortableProject,
+  mapProjectComponents,
+  mapProjectIcons,
+  scanPortableComponents,
+} from './project-grounding.js';
 import { saveReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, type CapturedNode } from './scenegraph.js';
 
@@ -159,6 +170,33 @@ const projectNode = (node: SerializedNode, detail: DetailLevel): Record<string, 
     ...full,
     ...(visible ? {} : { visible: false }),
     ...(children ? { children } : {}),
+  };
+};
+
+const groundingRoots = (
+  capture: KiwiCaptureServer,
+  routing: KiwiMcpRoutingState,
+  options: {
+    nodeId?: string;
+    depth?: number;
+    tabId?: number;
+    fileKey?: string;
+  },
+): { roots: DesignContextNode[]; caveats: string[] } => {
+  const result = pickNode(capture, routing, options.nodeId, {
+    ...(options.depth === undefined ? {} : { depth: options.depth }),
+    ...(options.tabId === undefined ? {} : { tabId: options.tabId }),
+    ...(options.fileKey === undefined ? {} : { fileKey: options.fileKey }),
+  });
+  const projected = projectNode(normalizeCapturedNode(result.captured), 'full');
+  const truncated = result.stats.nodeLimitReached || result.stats.depthLimitReached;
+  return {
+    roots: [DesignContextNodeSchema.parse(projected)],
+    caveats: truncated
+      ? [
+          `The captured subtree was truncated after ${result.stats.visited} nodes; unmapped project assets may belong to omitted descendants.`,
+        ]
+      : [],
   };
 };
 
@@ -443,6 +481,113 @@ export const createKiwiMcpServer = (
         );
       }
       return textResult(output);
+    },
+  );
+
+  server.registerTool(
+    'analyze_project',
+    {
+      description:
+        'Detect the local project framework, language, styling system and SVG import mode. ' +
+        'The standalone Kiwi bundle uses a portable dependency/config scan and reports its evidence.',
+      inputSchema: z.object({
+        rootDir: z.string().min(1).optional(),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ rootDir }) => textResult(await analyzePortableProject(rootDir ?? process.cwd())),
+  );
+
+  server.registerTool(
+    'scan_components',
+    {
+      description:
+        'Index exported UI components in the local project. The portable Kiwi scan verifies names ' +
+        'and exports without claiming prop coverage it cannot prove.',
+      inputSchema: z.object({
+        rootDir: z.string().min(1).optional(),
+        extensions: z.array(z.string().min(1)).optional(),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ rootDir, extensions }) => {
+      const result = await scanPortableComponents(rootDir ?? process.cwd(), extensions);
+      return textResult({
+        components: result.components,
+        profile: result.profile,
+        scanMode: result.profile.scanMode,
+        caveats: result.profile.caveats,
+        ...(result.omitted === 0
+          ? {}
+          : {
+              truncationNote: `file cap reached: ${result.omitted} further source files were not read, so a missing component may simply be outside what was scanned`,
+            }),
+      });
+    },
+  );
+
+  const projectMapInput = z.object({
+    nodeId: z.string().optional(),
+    depth: z.number().int().min(0).max(32).optional(),
+    threshold: z.number().min(0).max(1).optional(),
+    rootDir: z.string().min(1).optional(),
+    tabId: z.number().int().optional(),
+    fileKey: z.string().optional(),
+  });
+
+  server.registerTool(
+    'component_map',
+    {
+      description:
+        'Map component instances in the selected Figma subtree to exported components in the local ' +
+        'project. Returns confidence, instance ids, variant axes, explicit map-file overrides and ' +
+        'honest scan caveats so an agent can reuse the UI kit instead of rebuilding it.',
+      inputSchema: projectMapInput,
+      annotations: READ_ONLY,
+    },
+    async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
+      const grounded = groundingRoots(capture, routing, {
+        ...(nodeId === undefined ? {} : { nodeId }),
+        ...(depth === undefined ? {} : { depth }),
+        ...(tabId === undefined ? {} : { tabId }),
+        ...(fileKey === undefined ? {} : { fileKey }),
+      });
+      return textResult(
+        await mapProjectComponents({
+          roots: grounded.roots,
+          rootDir: rootDir ?? process.cwd(),
+          ...(threshold === undefined ? {} : { threshold }),
+          captureCaveats: grounded.caveats,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    'icon_map',
+    {
+      description:
+        'Map named Figma icons in the selected subtree to existing project SVG files. Strict ' +
+        'near-exact matching prevents a visually wrong icon from being reused; unmatched icons ' +
+        'remain explicit export candidates.',
+      inputSchema: projectMapInput,
+      annotations: READ_ONLY,
+    },
+    async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
+      const grounded = groundingRoots(capture, routing, {
+        ...(nodeId === undefined ? {} : { nodeId }),
+        ...(depth === undefined ? {} : { depth }),
+        ...(tabId === undefined ? {} : { tabId }),
+        ...(fileKey === undefined ? {} : { fileKey }),
+      });
+      return textResult(
+        await mapProjectIcons({
+          roots: grounded.roots,
+          rootDir: rootDir ?? process.cwd(),
+          ...(threshold === undefined ? {} : { threshold }),
+          captureCaveats: grounded.caveats,
+        }),
+      );
     },
   );
 
