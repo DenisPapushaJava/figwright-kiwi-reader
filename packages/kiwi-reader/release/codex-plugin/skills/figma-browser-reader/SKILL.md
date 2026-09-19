@@ -14,9 +14,11 @@ strictly read-only and does not use Figma REST API tokens, OAuth, or the Figma P
    Figma URL. When several decoded tabs make the target ambiguous, call `list_files`. In stdio mode,
    use `use_file`; in shared HTTP mode, pass that tab's `fileKey` or `tabId` to each read.
 3. Keep reads bounded. Follow `sectionPlan` and truncation metadata by requesting smaller subtrees.
-4. When implementing into an existing project, call `component_map` and `icon_map` with the project
-   root after reading the design context. Reuse high-confidence matches, verify medium matches, and
-   respect the portable scan caveat: unknown component props are not evidence that props are absent.
+4. When implementing into an existing project, call `component_map`, `icon_map`, and `token_map` with
+   the project root after reading the design context. Reuse high-confidence component/icon matches,
+   verify medium matches, and treat `matchedBy: ['value']` token candidates as name-blind evidence,
+   not proven Figma bindings. Respect the portable scan caveat: unknown component props are not
+   evidence that props are absent.
 5. Preserve node IDs and report unavailable assets, variables, fonts or component metadata.
 
 Never request Figma cookies, authentication tokens, a personal access token or edit permission.

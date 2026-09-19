@@ -38,7 +38,7 @@ node .\packages\kiwi-reader\dist\mcp.mjs
 
 Configure an MCP client to launch that command from the repository root. It advertises
 `browser_status`, `list_files`, `use_file`, `get_selection`, `get_node`, `get_design_context`,
-`analyze_project`, `scan_components`, `component_map`, `icon_map`, `save_assets`,
+`analyze_project`, `scan_components`, `component_map`, `icon_map`, `token_map`, `save_assets`,
 `capture_reference`, and `compare_screenshots`. `get_design_context` accepts a pasted Figma URL
 directly; when `nodeId` is omitted it uses the selected node from the attached tab's URL.
 
@@ -58,9 +58,9 @@ are configurable through `FIGWRIGHT_KIWI_PORT` and `FIGWRIGHT_KIWI_HUB_PORT`.
 
 The hub has no shared active-file switch. After `list_files`, pass `fileKey` or `tabId` to
 `get_selection`, `get_node`, `get_design_context`, `save_assets`, or `capture_reference` whenever
-more than one captured tab is available. The same explicit target fields apply to `component_map`
-and `icon_map`. This keeps concurrent clients isolated. If no hub token is set, the endpoint remains
-loopback-only and prints a security warning; a token is recommended for normal use.
+more than one captured tab is available. The same explicit target fields apply to `component_map`,
+`icon_map`, and `token_map`. This keeps concurrent clients isolated. If no hub token is set, the
+endpoint remains loopback-only and prints a security warning; a token is recommended for normal use.
 
 Normalized results use Figwright's existing `SerializedNode` contract. They retain geometry,
 paints, effects, text and auto-layout fields already confirmed on live Kiwi traffic while dropping
@@ -95,6 +95,15 @@ exports and names without bundling the native AST parser used by the full Figwri
 therefore marks prop extraction as unknown and never invents missing-prop TODOs. A verified
 `docs/figma-component-map.md` row remains the authoritative override, while stale file targets are
 reported instead of returned as usable imports.
+
+`token_map` collects colors actually used by the selected subtree (solid fills, strokes, gradient
+stops, shadow colors, and mixed-text runs) and joins them by exact value to CSS custom properties and
+SCSS variables under `rootDir`. A unique match is still reported as `medium` with
+`matchedBy: ["value"]`: it is a reuse candidate, not proof that the Figma layer was bound to that
+semantic token. Same-value candidates remain ambiguous, and more than three are counted rather than
+dumped. Stable Kiwi shared-style ids are returned as opaque `unresolvedStyleRefs`; the reader does
+not invent style names or variable collections that are absent from the captured wire data. The
+portable release does not evaluate JavaScript or TypeScript token configs.
 
 Load `packages/kiwi-reader/extension` as an unpacked extension in Chrome 116 or newer. After starting
 the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose

@@ -1,0 +1,313 @@
+import { resolve } from 'node:path';
+
+import {
+  toHex,
+  type DesignContextNode,
+  type SerializedPaint,
+  type SimplifiedPaint,
+} from '@figwright/shared';
+
+import { truncationNote } from '../../mcp/src/repo-walk.js';
+import { normHex } from '../../mcp/src/tokens/hex.js';
+import { aggregateRepoCssTokens } from '../../mcp/src/tokens/repo-css.js';
+import { aggregateRepoScssTokens } from '../../mcp/src/tokens/repo-scss.js';
+import { type ProjectToken, refOf } from '../../mcp/src/tokens/tokens.js';
+import { analyzePortableProject, type PortableProjectProfile } from './project-grounding.js';
+
+const MAX_CANDIDATES = 3;
+const SCAN_MODE = 'portable-css-scss' as const;
+
+type ColorProperty =
+  | 'fills'
+  | 'fills.gradientStops'
+  | 'strokes'
+  | 'strokes.gradientStops'
+  | 'effects'
+  | 'segments.fills'
+  | 'segments.fills.gradientStops';
+
+type StyleSlot = 'fill' | 'stroke' | 'effect' | 'text';
+
+export interface KiwiTokenCandidate {
+  token: string;
+  ref: string;
+  cssVar?: string;
+  utility?: string;
+  from?: string;
+  confidence: number;
+  matchedBy: ['value'];
+}
+
+export interface KiwiTokenMapping {
+  figmaValue: string;
+  figmaType: 'COLOR';
+  source: 'observed-value';
+  nodeIds: string[];
+  properties: ColorProperty[];
+  styleRefs?: string[];
+  status: 'medium' | 'ambiguous' | 'unmapped';
+  candidate?: KiwiTokenCandidate;
+  candidates?: KiwiTokenCandidate[];
+  candidateCount?: number;
+}
+
+export interface KiwiStyleReference {
+  id: string;
+  slots: StyleSlot[];
+  nodeIds: string[];
+}
+
+export interface KiwiTokenMapResult {
+  mappings: KiwiTokenMapping[];
+  unmapped: string[];
+  ambiguous: string[];
+  unresolvedStyleRefs: KiwiStyleReference[];
+  profile: PortableProjectProfile;
+  projectTokenCount: number;
+  tokenFiles: string[];
+  scanMode: typeof SCAN_MODE;
+  variableBindings: 'unavailable';
+  caveats: string[];
+  truncationNote?: string;
+}
+
+interface ColorUsage {
+  nodeIds: Set<string>;
+  properties: Set<ColorProperty>;
+  styleRefs: Set<string>;
+}
+
+interface StyleUsage {
+  slots: Set<StyleSlot>;
+  nodeIds: Set<string>;
+}
+
+const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+const addStyleRef = (
+  usages: Map<string, StyleUsage>,
+  id: string | undefined,
+  slot: StyleSlot,
+  nodeId: string,
+): void => {
+  if (id === undefined) return;
+  const usage = usages.get(id) ?? { slots: new Set<StyleSlot>(), nodeIds: new Set<string>() };
+  usage.slots.add(slot);
+  usage.nodeIds.add(nodeId);
+  usages.set(id, usage);
+};
+
+const addColor = (
+  usages: Map<string, ColorUsage>,
+  raw: string,
+  nodeId: string,
+  property: ColorProperty,
+  styleRef?: string,
+): void => {
+  const value = normHex(raw);
+  if (value === null) return;
+  const usage =
+    usages.get(value) ??
+    ({
+      nodeIds: new Set<string>(),
+      properties: new Set<ColorProperty>(),
+      styleRefs: new Set<string>(),
+    } satisfies ColorUsage);
+  usage.nodeIds.add(nodeId);
+  usage.properties.add(property);
+  if (styleRef !== undefined) usage.styleRefs.add(styleRef);
+  usages.set(value, usage);
+};
+
+const collectPaints = (
+  usages: Map<string, ColorUsage>,
+  nodeId: string,
+  paints: readonly SerializedPaint[] | undefined,
+  property: 'fills' | 'strokes' | 'segments.fills',
+  styleRef?: string,
+): void => {
+  for (const paint of paints ?? []) {
+    if (!paint.visible) continue;
+    if (paint.type === 'SOLID') {
+      addColor(usages, toHex(paint.color, paint.opacity), nodeId, property, styleRef);
+      continue;
+    }
+    if (!('gradientStops' in paint)) continue;
+    const stopProperty = `${property}.gradientStops` as ColorProperty;
+    for (const stop of paint.gradientStops) {
+      addColor(usages, toHex(stop.color, stop.color.a), nodeId, stopProperty, styleRef);
+    }
+  }
+};
+
+const collectSimplifiedPaints = (
+  usages: Map<string, ColorUsage>,
+  nodeId: string,
+  paints: readonly SimplifiedPaint[],
+  styleRef?: string,
+): void => {
+  for (const paint of paints) {
+    if (paint.visible === false) continue;
+    if (paint.color !== undefined) {
+      addColor(usages, paint.color, nodeId, 'segments.fills', styleRef);
+    }
+    for (const stop of paint.gradientStops ?? []) {
+      addColor(usages, stop.color, nodeId, 'segments.fills.gradientStops', styleRef);
+    }
+  }
+};
+
+const collectNodeGrounding = (
+  node: DesignContextNode,
+  colors: Map<string, ColorUsage>,
+  styles: Map<string, StyleUsage>,
+): void => {
+  const styleIds = node.styleIds;
+  addStyleRef(styles, styleIds?.fill, 'fill', node.id);
+  addStyleRef(styles, styleIds?.stroke, 'stroke', node.id);
+  addStyleRef(styles, styleIds?.effect, 'effect', node.id);
+  addStyleRef(styles, styleIds?.text, 'text', node.id);
+
+  collectPaints(
+    colors,
+    node.id,
+    Array.isArray(node.fills) ? node.fills : undefined,
+    'fills',
+    styleIds?.fill,
+  );
+  collectPaints(colors, node.id, node.strokes, 'strokes', styleIds?.stroke);
+  for (const effect of node.effects ?? []) {
+    if (!effect.visible || effect.color === undefined) continue;
+    addColor(colors, toHex(effect.color, effect.color.a), node.id, 'effects', styleIds?.effect);
+  }
+
+  for (const segment of node.segments ?? []) {
+    addStyleRef(styles, segment.styleIds?.fill, 'fill', node.id);
+    addStyleRef(styles, segment.styleIds?.text, 'text', node.id);
+    collectSimplifiedPaints(colors, node.id, segment.fills, segment.styleIds?.fill);
+  }
+  for (const child of node.children ?? []) collectNodeGrounding(child, colors, styles);
+};
+
+const dedupeTokens = (tokens: readonly ProjectToken[]): ProjectToken[] => {
+  const seen = new Set<string>();
+  return tokens.filter(token => {
+    const key = [
+      token.name,
+      token.value,
+      token.cssVar ?? '',
+      token.utility ?? '',
+      token.scssVar ?? '',
+      token.from ?? '',
+    ].join('\u0000');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const candidateFrom = (token: ProjectToken, utilityFirst: boolean): KiwiTokenCandidate => ({
+  token: token.name,
+  ref: refOf(token, utilityFirst),
+  ...(token.cssVar === undefined ? {} : { cssVar: token.cssVar }),
+  ...(token.utility === undefined ? {} : { utility: token.utility }),
+  ...(token.from === undefined ? {} : { from: token.from }),
+  confidence: 0.9,
+  matchedBy: ['value'],
+});
+
+/**
+ * Join colors actually observed in the captured subtree to portable CSS/SCSS project tokens. Kiwi
+ * does not expose variable or shared-style names, so this deliberately performs no name join.
+ */
+export const mapProjectTokens = async (input: {
+  roots: readonly DesignContextNode[];
+  rootDir: string;
+  captureCaveats?: readonly string[];
+}): Promise<KiwiTokenMapResult> => {
+  const rootDir = resolve(input.rootDir);
+  const [profile, css, scss] = await Promise.all([
+    analyzePortableProject(rootDir),
+    aggregateRepoCssTokens(rootDir),
+    aggregateRepoScssTokens(rootDir),
+  ]);
+  const projectTokens = dedupeTokens([...scss.tokens, ...css.tokens]);
+  const utilityFirst = profile.styling.system === 'tailwind' || profile.styling.system === 'unocss';
+  const projectByValue = new Map<string, ProjectToken[]>();
+  for (const token of projectTokens) {
+    const value = normHex(token.value);
+    if (value === null) continue;
+    const matches = projectByValue.get(value) ?? [];
+    matches.push(token);
+    projectByValue.set(value, matches);
+  }
+
+  const colors = new Map<string, ColorUsage>();
+  const styles = new Map<string, StyleUsage>();
+  for (const root of input.roots) collectNodeGrounding(root, colors, styles);
+
+  const mappings: KiwiTokenMapping[] = [];
+  for (const [value, usage] of [...colors].toSorted(([a], [b]) => compare(a, b))) {
+    const matches = projectByValue.get(value) ?? [];
+    const base = {
+      figmaValue: value,
+      figmaType: 'COLOR' as const,
+      source: 'observed-value' as const,
+      nodeIds: [...usage.nodeIds].toSorted(compare),
+      properties: [...usage.properties].toSorted(compare),
+      ...(usage.styleRefs.size === 0 ? {} : { styleRefs: [...usage.styleRefs].toSorted(compare) }),
+    };
+    if (matches.length === 1) {
+      mappings.push({
+        ...base,
+        status: 'medium',
+        candidate: candidateFrom(matches[0] as ProjectToken, utilityFirst),
+      });
+      continue;
+    }
+    if (matches.length > 1) {
+      const ordered = matches.toSorted((a, b) => compare(a.name, b.name));
+      mappings.push({
+        ...base,
+        status: 'ambiguous',
+        candidateCount: matches.length,
+        ...(matches.length > MAX_CANDIDATES
+          ? {}
+          : { candidates: ordered.map(token => candidateFrom(token, utilityFirst)) }),
+      });
+      continue;
+    }
+    mappings.push({ ...base, status: 'unmapped' });
+  }
+
+  const unresolvedStyleRefs = [...styles]
+    .toSorted(([a], [b]) => compare(a, b))
+    .map(([id, usage]) => ({
+      id,
+      slots: [...usage.slots].toSorted(compare),
+      nodeIds: [...usage.nodeIds].toSorted(compare),
+    }));
+  const omitted = css.omitted + scss.omitted;
+  return {
+    mappings,
+    unmapped: mappings
+      .filter(mapping => mapping.status === 'unmapped')
+      .map(mapping => mapping.figmaValue),
+    ambiguous: mappings
+      .filter(mapping => mapping.status === 'ambiguous')
+      .map(mapping => mapping.figmaValue),
+    unresolvedStyleRefs,
+    profile,
+    projectTokenCount: projectTokens.length,
+    tokenFiles: [...new Set([...css.files, ...scss.files])].toSorted(compare),
+    scanMode: SCAN_MODE,
+    variableBindings: 'unavailable',
+    caveats: [
+      'Matches use exact color-value equality only. They are reuse candidates, not proven Figma variable bindings.',
+      'Captured shared-style ids are opaque: Kiwi exposes stable ids but not their Figma names or definitions.',
+      'The portable scan reads CSS custom properties and SCSS variables; JavaScript and TypeScript token configs are not evaluated.',
+      ...(input.captureCaveats ?? []),
+    ],
+    ...(omitted === 0 ? {} : { truncationNote: truncationNote('stylesheet files', omitted) }),
+  };
+};
