@@ -12,7 +12,8 @@
       "project": ["src/**/*.ts"]
     },
     "packages/kiwi-reader": {
-      "project": ["src/**/*.ts"]
+      "project": ["src/**/*.ts"],
+      "ignoreDependencies": ["fdir", "ignore"]
     },
     "packages/plugin": {
       "project": ["protocol/**/*.ts", "src/**/*.ts", "ui/**/*.{ts,vue,css}"]

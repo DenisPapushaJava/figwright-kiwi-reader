@@ -214,10 +214,11 @@ Implementation status (2026-09-19):
   the original image after an opt-in uncached reload, and a transparent component root no longer
   introduced a black SVG fill. Three unsupported composite vector containers were reported as
   missing while their usable child icons were still exported.
-- **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed text runs,
-  variables, variable-bound slot properties and native node crops. Boolean visibility assignments,
-  verified variant axes and explicit symbol-override swaps are supported. The current exporter records an
-  unsupported-paint warning and never silently substitutes black for an unsupported vector paint.
+- **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed-text links,
+  lists and per-run bindings, variables, variable-bound slot properties and native node crops.
+  Boolean visibility assignments, verified variant axes, explicit symbol-override swaps and
+  mixed-style text runs are supported. The current exporter records an unsupported-paint warning
+  and never silently substitutes black for an unsupported vector paint.
 - **Live gate still required:** reload the unpacked extension, recapture real files containing a
   photo, composite icon, variable/mixed text and nested instance, then compare against a native or
   viewport PNG before marking Phase 5 complete.
@@ -355,6 +356,13 @@ renderer/font antialiasing differences from structural, typography and missing-a
   explainable convergence rather than claiming perfect equality without evidence.
 
 ## Phase 6: tokens, components and codegen integration
+
+Status: component and icon grounding are available through the isolated Kiwi MCP. They reuse the
+existing pure Figwright joins against a portable, gitignore-aware project index. The standalone
+bundle confirms component exports and names but deliberately leaves prop coverage unknown instead
+of shipping the native AST parser; explicit component-map overrides still work and stale targets are
+reported. Variable/style resolution, `token_map`, the codegen skill handoff and live UI-kit parity
+remain open.
 
 - Resolve shared style references to stable names and values.
 - Build variable collections/modes only when the wire data proves them; do not invent REST-only

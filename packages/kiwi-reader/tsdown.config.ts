@@ -1,7 +1,10 @@
 import { defineConfig } from 'tsdown';
 
+// fdir and ignore enter through the provider-neutral project walkers reused from packages/mcp.
+// Keep them declared on Kiwi Reader and bundled here so the release remains standalone; knip cannot
+// attribute a dependency imported across a workspace source boundary, so knip.json records the pair.
 const standaloneDependencies =
-  /^(?:@figwright\/shared|@modelcontextprotocol\/(?:server|core)|fzstd|kiwi-schema|ws|zod)(?:\/.*)?$/;
+  /^(?:@figwright\/shared|@modelcontextprotocol\/(?:server|core)|fdir|fzstd|ignore|kiwi-schema|ws|zod)(?:\/.*)?$/;
 
 export default defineConfig({
   entry: ['src/index.ts', 'src/live-probe.ts', 'src/mcp.ts', 'src/hub.ts', 'src/serve.ts'],

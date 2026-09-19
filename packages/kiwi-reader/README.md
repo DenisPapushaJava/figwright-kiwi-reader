@@ -38,8 +38,9 @@ node .\packages\kiwi-reader\dist\mcp.mjs
 
 Configure an MCP client to launch that command from the repository root. It advertises
 `browser_status`, `list_files`, `use_file`, `get_selection`, `get_node`, `get_design_context`,
-`save_assets`, `capture_reference`, and `compare_screenshots`. `get_design_context` accepts a pasted
-Figma URL directly; when `nodeId` is omitted it uses the selected node from the attached tab's URL.
+`analyze_project`, `scan_components`, `component_map`, `icon_map`, `save_assets`,
+`capture_reference`, and `compare_screenshots`. `get_design_context` accepts a pasted Figma URL
+directly; when `nodeId` is omitted it uses the selected node from the attached tab's URL.
 
 ## Shared MCP hub
 
@@ -57,9 +58,9 @@ are configurable through `FIGWRIGHT_KIWI_PORT` and `FIGWRIGHT_KIWI_HUB_PORT`.
 
 The hub has no shared active-file switch. After `list_files`, pass `fileKey` or `tabId` to
 `get_selection`, `get_node`, `get_design_context`, `save_assets`, or `capture_reference` whenever
-more than one captured tab is available. This keeps concurrent clients isolated. If no hub token is
-set, the endpoint remains loopback-only and prints a security warning; a token is recommended for
-normal use.
+more than one captured tab is available. The same explicit target fields apply to `component_map`
+and `icon_map`. This keeps concurrent clients isolated. If no hub token is set, the endpoint remains
+loopback-only and prints a security warning; a token is recommended for normal use.
 
 Normalized results use Figwright's existing `SerializedNode` contract. They retain geometry,
 paints, effects, text and auto-layout fields already confirmed on live Kiwi traffic while dropping
@@ -86,6 +87,14 @@ definition name, so the resolved component is exposed through `mainComponent` wh
 `INSTANCE_SWAP` property is omitted rather than invented.
 Expanded descendants receive instance-scoped ids, and recursive or missing component references are
 reported in the response capture metadata instead of looping or silently inventing content.
+
+`component_map` joins those grounded Figma component identities to exported components under the
+requested local `rootDir`; `icon_map` performs a stricter near-exact join against existing SVG files
+and reports their color/import contract. The portable Kiwi release deliberately indexes component
+exports and names without bundling the native AST parser used by the full Figwright server. It
+therefore marks prop extraction as unknown and never invents missing-prop TODOs. A verified
+`docs/figma-component-map.md` row remains the authoritative override, while stale file targets are
+reported instead of returned as usable imports.
 
 Load `packages/kiwi-reader/extension` as an unpacked extension in Chrome 116 or newer. After starting
 the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose
