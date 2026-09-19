@@ -196,6 +196,7 @@ export const project = (node: SceneNode, detail: DetailLevel): DesignContextNode
         textDecoration: s.textDecoration,
         textCase: s.textCase,
       };
+      if (s.fontWeight !== undefined) seg.fontWeight = s.fontWeight;
       if (s.lineHeight !== undefined) seg.lineHeight = s.lineHeight;
       if (s.letterSpacing !== undefined) seg.letterSpacing = s.letterSpacing;
       if (s.hyperlink !== undefined) seg.hyperlink = s.hyperlink;

@@ -1035,6 +1035,7 @@ describe('serializeFlat — typography', () => {
       { family: 'Inter', style: 'Regular', variationSettings: { wght: 400 } },
       { family: 'Inter', style: 'Regular', variationSettings: { wght: 700 } },
     ]);
+    expect(out.segments?.map(seg => seg.fontWeight)).toEqual([400, 700]);
   });
 
   it('omits segments for uniform text', () => {
@@ -1069,6 +1070,7 @@ describe('serializeFlat — typography', () => {
     expect(getStyledTextSegments.mock.calls[0]?.[0]).toEqual([
       'fontName',
       'fontSize',
+      'fontWeight',
       'fills',
       'textDecoration',
       'textCase',

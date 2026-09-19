@@ -420,13 +420,13 @@ export const createKiwiMcpServer = (
               : assets.summary.availableImages === assets.summary.images
                 ? 'exportable'
                 : 'partially-exportable',
-          mixedTextRuns: 'unsupported',
+          mixedTextRuns: 'style-overrides',
           variables: 'unsupported',
           visualReference: 'not-captured',
         },
         assets,
         caveats: [
-          'Variables and mixed text runs are not resolved yet.',
+          'Variables and mixed-text links, lists, and per-run bindings are not resolved yet.',
           'When Kiwi exposes an instance swap only as an overridden symbol id, the swapped component tree is resolved but its component-property definition name is unavailable.',
           ...rasterAssetCaveats(assets.summary, result.session.captureImages),
           ...(result.stats.unresolvedInstances === 0

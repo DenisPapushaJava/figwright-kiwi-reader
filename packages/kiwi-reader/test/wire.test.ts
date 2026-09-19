@@ -54,6 +54,79 @@ describe('Kiwi wire detection', () => {
     });
   });
 
+  it('preserves Kiwi mixed-text style ids and their explicit override ids', () => {
+    const schema = parseSchema(`
+      struct FontName {
+        string family;
+        string style;
+      }
+      message TextData {
+        string characters = 1;
+        uint[] characterStyleIDs = 2;
+        NodeChange[] styleOverrideTable = 3;
+      }
+      message NodeChange {
+        uint styleID = 1;
+        float fontSize = 2;
+        FontName fontName = 3;
+        TextData textData = 4;
+      }
+      message Message {
+        NodeChange[] nodeChanges = 1;
+      }
+    `);
+    const codec = compileSchema(schema) as {
+      encodeMessage: (value: unknown) => Uint8Array;
+    };
+    const schemaBytes = zstdCompressSync(encodeBinarySchema(schema));
+    const schemaFrame = new Uint8Array(12 + schemaBytes.length);
+    schemaFrame.set(new TextEncoder().encode('fig-wire'));
+    schemaFrame.set(schemaBytes, 12);
+
+    const decoder = new KiwiWireDecoder();
+    expect(decoder.ingest(schemaFrame)).toEqual({ kind: 'schema' });
+
+    const messageBytes = codec.encodeMessage({
+      nodeChanges: [
+        {
+          fontSize: 16,
+          fontName: { family: 'Inter', style: 'Regular' },
+          textData: {
+            characters: 'Mixed',
+            characterStyleIDs: [0, 0, 7, 7, 7],
+            styleOverrideTable: [
+              {
+                styleID: 7,
+                fontSize: 20,
+                fontName: { family: 'Inter', style: 'Bold' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(decoder.ingest(zstdCompressSync(messageBytes))).toMatchObject({
+      kind: 'message',
+      message: {
+        nodeChanges: [
+          {
+            textData: {
+              characters: 'Mixed',
+              characterStyleIDs: [0, 0, 7, 7, 7],
+              styleOverrideTable: [
+                {
+                  styleID: 7,
+                  fontSize: 20,
+                  fontName: { family: 'Inter', style: 'Bold' },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+  });
+
   it('identifies an incompatible schema frame', () => {
     const frame = new Uint8Array(16);
     frame.set(new TextEncoder().encode('fig-wire'));

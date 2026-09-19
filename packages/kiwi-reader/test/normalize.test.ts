@@ -139,6 +139,138 @@ describe('normalizeCapturedNode', () => {
     expect(node.children?.[0]).toMatchObject({ id: '3:2', visible: false, parentId: '3:1' });
   });
 
+  it('reconstructs mixed text runs by explicit Kiwi style id and defaults omitted trailing ids', () => {
+    const node = normalizeCapturedNode({
+      id: '4:2',
+      name: 'Mixed label',
+      type: 'TEXT',
+      visible: true,
+      raw: {
+        guid: { sessionID: 4, localID: 2 },
+        fontSize: 16,
+        fontName: { family: 'Inter', style: 'Regular', postscript: 'Inter-Regular' },
+        fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0, b: 0, a: 1 } }],
+        textDecoration: 'NONE',
+        textCase: 'ORIGINAL',
+        textData: {
+          characters: 'Hello!',
+          // The final zero is omitted by Kiwi and must still resolve to the base node style.
+          characterStyleIDs: [0, 0, 7, 7, 7],
+          styleOverrideTable: [
+            {
+              // Deliberately comes first: lookup must use styleID, never the array position.
+              styleID: 8,
+              fontSize: 18,
+              fontName: { family: 'Inter', style: 'Medium', postscript: 'Inter-Medium' },
+            },
+            {
+              styleID: 7,
+              fontSize: 20,
+              fontName: { family: 'Inter', style: 'Bold', postscript: 'Inter-Bold' },
+              fillPaints: [{ type: 'SOLID', color: { r: 1, g: 0, b: 0, a: 1 } }],
+              textDecoration: 'UNDERLINE',
+              textCase: 'UPPER',
+              lineHeight: { value: 24, units: 'PIXELS' },
+              letterSpacing: { value: 1, units: 'PIXELS' },
+            },
+          ],
+          fontMetaData: [
+            {
+              key: { family: 'Inter', style: 'Regular', postscript: 'Inter-Regular' },
+              fontWeight: 400,
+            },
+            {
+              key: { family: 'Inter', style: 'Bold', postscript: 'Inter-Bold' },
+              fontWeight: 700,
+            },
+          ],
+        },
+      },
+      children: [],
+    });
+
+    expect(SerializedNodeSchema.safeParse(node).success).toBe(true);
+    expect(node).toMatchObject({
+      characters: 'Hello!',
+      fontName: 'mixed',
+      fontSize: 'mixed',
+      fontWeight: 'mixed',
+      fills: 'mixed',
+      textDecoration: 'mixed',
+      textCase: 'mixed',
+      lineHeight: 'mixed',
+      letterSpacing: 'mixed',
+      segments: [
+        {
+          characters: 'He',
+          start: 0,
+          end: 2,
+          fontName: {
+            family: 'Inter',
+            style: 'Regular',
+            postScriptName: 'Inter-Regular',
+          },
+          fontSize: 16,
+          fontWeight: 400,
+          fills: [{ type: 'SOLID', visible: true, opacity: 1, color: { r: 0, g: 0, b: 0 } }],
+          textDecoration: 'NONE',
+          textCase: 'ORIGINAL',
+        },
+        {
+          characters: 'llo',
+          start: 2,
+          end: 5,
+          fontName: { family: 'Inter', style: 'Bold', postScriptName: 'Inter-Bold' },
+          fontSize: 20,
+          fontWeight: 700,
+          fills: [{ type: 'SOLID', visible: true, opacity: 1, color: { r: 1, g: 0, b: 0 } }],
+          textDecoration: 'UNDERLINE',
+          textCase: 'UPPER',
+          lineHeight: { value: 24, unit: 'PIXELS' },
+          letterSpacing: { value: 1, unit: 'PIXELS' },
+        },
+        {
+          characters: '!',
+          start: 5,
+          end: 6,
+          fontName: {
+            family: 'Inter',
+            style: 'Regular',
+            postScriptName: 'Inter-Regular',
+          },
+          fontSize: 16,
+          fontWeight: 400,
+          fills: [{ type: 'SOLID', visible: true, opacity: 1, color: { r: 0, g: 0, b: 0 } }],
+          textDecoration: 'NONE',
+          textCase: 'ORIGINAL',
+        },
+      ],
+    });
+  });
+
+  it('does not emit partial mixed runs when a referenced style id is missing', () => {
+    const node = normalizeCapturedNode({
+      id: '5:2',
+      name: 'Invalid mixed label',
+      type: 'TEXT',
+      visible: true,
+      raw: {
+        guid: { sessionID: 5, localID: 2 },
+        fontSize: 16,
+        fontName: { family: 'Inter', style: 'Regular' },
+        textData: {
+          characters: 'Bad',
+          characterStyleIDs: [0, 9, 9],
+          styleOverrideTable: [{ styleID: 7, fontSize: 20 }],
+        },
+      },
+      children: [],
+    });
+
+    expect(node).not.toHaveProperty('segments');
+    expect(node).toMatchObject({ fontSize: 16, fontName: { family: 'Inter', style: 'Regular' } });
+  });
+
   it('maps child sizing against the parent axis and accepts array transforms', () => {
     const node = normalizeCapturedNode({
       id: '7:2',

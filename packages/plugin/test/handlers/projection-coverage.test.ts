@@ -145,6 +145,7 @@ const fullSegment = {
   end: 4,
   fontName: { family: 'Inter', style: 'Bold' },
   fontSize: 16,
+  fontWeight: 700,
   fills: [SOLID],
   textDecoration: 'UNDERLINE',
   textCase: 'UPPER',
