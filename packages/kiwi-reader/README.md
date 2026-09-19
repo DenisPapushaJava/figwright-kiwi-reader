@@ -69,6 +69,11 @@ payload budget becomes a section plan so an agent can request individual child s
 Component instances whose children are implicit in Kiwi are expanded from their referenced
 `SYMBOL` definition. The reader applies component text-property assignments, explicit
 `symbolOverrides`, and Figma's resolved `derivedSymbolData` without mutating the cached master.
+Boolean component-property assignments control the referenced layer's visibility, and verified
+variant axes are emitted as `componentProperties`. A variant also carries its parent component-set
+id and name so component grounding can match `Button` instead of a variant-only name such as
+`Size=M, State=Enabled`. Variant axes are emitted only when the master's canonical name agrees with
+its `variantPropSpecs`; unresolved property names are not guessed.
 Expanded descendants receive instance-scoped ids, and recursive or missing component references are
 reported in the response capture metadata instead of looping or silently inventing content.
 

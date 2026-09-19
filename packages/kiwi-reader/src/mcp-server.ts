@@ -405,6 +405,7 @@ export const createKiwiMcpServer = (
           structuredProperties: 'captured-when-present',
           componentInstances:
             result.stats.unresolvedInstances === 0 ? 'resolved' : 'partially-resolved',
+          componentProperties: 'variants-and-boolean-visibility',
           vectorAssets:
             assets.summary.vectors === 0
               ? 'not-present'
@@ -424,7 +425,7 @@ export const createKiwiMcpServer = (
         },
         assets,
         caveats: [
-          'Variables, non-text component-property assignments and mixed text runs are not resolved yet.',
+          'Variables, mixed text runs, and instance-swap/slot component-property assignments are not resolved yet.',
           ...rasterAssetCaveats(assets.summary, result.session.captureImages),
           ...(result.stats.unresolvedInstances === 0
             ? []

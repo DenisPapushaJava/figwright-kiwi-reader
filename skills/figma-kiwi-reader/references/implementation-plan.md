@@ -71,8 +71,9 @@ its cache, reconnect recovers automatically, and memory/queue limits fail explic
 
 Status: the observed-property slice and read-only instance expansion are implemented. Instances are
 resolved through `symbolData.symbolID`, cloned with instance-scoped ids, and receive text component
-properties plus `symbolOverrides` / `derivedSymbolData`. Live parity for additional component
-property kinds, tokens, mixed text and assets is still open.
+properties plus `symbolOverrides` / `derivedSymbolData`. Boolean visibility properties are applied,
+verified variant axes are normalized, and variant masters carry their component-set identity for
+grounding. Instance-swap/slot assignments, tokens, mixed text and remaining assets are still open.
 
 Create a pure normalizer that emits the existing `SerializedNode` contract from `@figwright/shared`.
 Start with properties already observed live:
@@ -210,7 +211,8 @@ Implementation status (2026-09-19):
   introduced a black SVG fill. Three unsupported composite vector containers were reported as
   missing while their usable child icons were still exported.
 - **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed text runs,
-  variables, non-text instance properties and native node crops. The current exporter records an
+  variables, instance-swap/slot properties and native node crops. Boolean visibility assignments
+  and verified variant axes are supported. The current exporter records an
   unsupported-paint warning and never silently substitutes black for an unsupported vector paint.
 - **Live gate still required:** reload the unpacked extension, recapture real files containing a
   photo, composite icon, variable/mixed text and nested instance, then compare against a native or
@@ -306,7 +308,8 @@ and its manifest contains the exact fit/crop data needed to reproduce the visibl
 - Add truncation/max-lines/wrap, OpenType features and paragraph/list properties when the wire data
   proves them. Keep exact character ranges.
 - Complete min/max sizing, GRID tracks and child placement, layout grids, overflow/fixed children,
-  aspect ratio, annotations, paint/effect variable bindings and non-text component properties.
+  aspect ratio, annotations, paint/effect variable bindings and instance-swap/slot component
+  properties.
 - Report missing fonts. Do not copy font files out of Figma network traffic; generated code must use
   a project-owned/licensed font source or an explicit fallback.
 
