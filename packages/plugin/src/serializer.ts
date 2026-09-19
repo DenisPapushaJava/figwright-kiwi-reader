@@ -360,6 +360,7 @@ const collectStyleLinks = (node: SceneNode, out: SerializedNode): void => {
 const SEGMENT_FIELDS = [
   'fontName',
   'fontSize',
+  'fontWeight',
   'fills',
   'textDecoration',
   'textCase',
@@ -395,6 +396,12 @@ const serializeTextSegments = (text: TextNode): SerializedTextSegment[] => {
       textDecoration: s.textDecoration,
       textCase: s.textCase,
     };
+    const fontWeight = (s as unknown as { fontWeight?: unknown }).fontWeight;
+    if (typeof fontWeight === 'number' && Number.isFinite(fontWeight)) {
+      out.fontWeight = fontWeight;
+    } else if (typeof out.fontName.variationSettings?.wght === 'number') {
+      out.fontWeight = out.fontName.variationSettings.wght;
+    }
     // Per-run leading / tracking, only when they carry a concrete non-default value (AUTO leading /
     // 0 tracking are the no-ops). A segment is a uniform run, so these are never `mixed` on a real
     // node — skip the MIXED fallback so a run stays lean rather than emitting a meaningless marker.

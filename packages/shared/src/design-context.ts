@@ -51,6 +51,7 @@ export interface DesignContextTextSegment {
   end: number;
   fontName: z.infer<typeof SerializedFontNameSchema>;
   fontSize: number;
+  fontWeight?: number;
   fills: readonly SimplifiedPaint[];
   textDecoration: string;
   textCase: string;
@@ -389,6 +390,7 @@ export const DesignContextNodeSchema = z.lazy(() =>
           end: z.number(),
           fontName: SerializedFontNameSchema,
           fontSize: z.number(),
+          fontWeight: z.number().optional(),
           fills: z.array(z.unknown()),
           textDecoration: z.string(),
           textCase: z.string(),

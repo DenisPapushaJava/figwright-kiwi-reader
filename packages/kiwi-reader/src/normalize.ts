@@ -5,9 +5,11 @@ import {
   type SerializedEffect,
   type SerializedLetterSpacing,
   type SerializedLineHeight,
+  type SerializedFontName,
   type SerializedNode,
   type SerializedPaint,
   type SerializedStyleIds,
+  type SerializedTextSegment,
 } from '@figwright/shared';
 
 import { nodeId, type CapturedNode, type KiwiGuid } from './scenegraph.js';
@@ -227,20 +229,12 @@ const normalizeStyleIds = (raw: UnknownRecord): SerializedStyleIds | undefined =
   return Object.keys(output).length === 0 ? undefined : output;
 };
 
-const parentId = (raw: UnknownRecord): string | null => {
-  const parent = record(raw.parentIndex);
-  const guid = record(parent?.guid) as KiwiGuid | null;
-  return guid === null ? null : nodeId(guid);
-};
-
-const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
-  const text = record(raw.textData);
-  if (text === null) return;
-  const characters = typeof text.characters === 'string' ? text.characters : undefined;
-  const fontSize = finiteNumber(raw.fontSize ?? text.fontSize);
-  const font = record(raw.fontName ?? text.fontName);
+const normalizeFontName = (value: unknown): SerializedFontName | undefined => {
+  const font = record(value);
   const family = nonEmptyString(font?.family);
   const style = nonEmptyString(font?.style);
+  if (family === undefined || style === undefined) return undefined;
+
   const postScriptName = nonEmptyString(
     font?.postScriptName ?? font?.postscriptName ?? font?.postscript,
   );
@@ -253,19 +247,174 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
             (entry): entry is [string, number] => finiteNumber(entry[1]) !== undefined,
           ),
         );
-  const fontWeight = finiteNumber(raw.fontWeight ?? text.fontWeight ?? variations?.wght);
+  return {
+    family,
+    style,
+    ...(postScriptName === undefined ? {} : { postScriptName }),
+    ...(variations === undefined || Object.keys(variations).length === 0
+      ? {}
+      : { variationSettings: variations }),
+  };
+};
+
+const sameValue = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
+
+const matchingFontWeight = (
+  raw: UnknownRecord,
+  text: UnknownRecord,
+  fontName: SerializedFontName,
+): number | undefined => {
+  const derived = record(raw.derivedTextData);
+  const metadata = Array.isArray(text.fontMetaData)
+    ? text.fontMetaData
+    : Array.isArray(derived?.fontMetaData)
+      ? derived.fontMetaData
+      : [];
+  for (const item of metadata) {
+    const meta = record(item);
+    const key = normalizeFontName(meta?.key);
+    if (key !== undefined && sameValue(key, fontName)) return finiteNumber(meta?.fontWeight);
+  }
+  return undefined;
+};
+
+type NormalizedTextStyle = Omit<SerializedTextSegment, 'characters' | 'start' | 'end'>;
+
+const normalizeTextStyle = (
+  raw: UnknownRecord,
+  text: UnknownRecord,
+  override?: UnknownRecord,
+): NormalizedTextStyle | undefined => {
+  const source = override === undefined ? raw : { ...raw, ...override };
+  const fontName = normalizeFontName(source.fontName ?? text.fontName);
+  const fontSize = finiteNumber(source.fontSize ?? text.fontSize);
+  if (fontName === undefined || fontSize === undefined) return undefined;
+
+  const variations = fontName.variationSettings;
+  const fontWeight =
+    finiteNumber(source.fontWeight ?? text.fontWeight ?? variations?.wght) ??
+    matchingFontWeight(raw, text, fontName);
+  const fills = normalizePaints(source.fillPaints) ?? [];
+  const textDecoration = nonEmptyString(source.textDecoration ?? text.textDecoration) ?? 'NONE';
+  const textCase = nonEmptyString(source.textCase ?? text.textCase) ?? 'ORIGINAL';
+  const lineHeight = normalizeLineHeight(source.lineHeight ?? text.lineHeight);
+  const letterSpacing = normalizeLetterSpacing(source.letterSpacing ?? text.letterSpacing);
+  const styleIds = normalizeStyleIds(source);
+
+  return {
+    fontName,
+    fontSize,
+    ...(fontWeight === undefined ? {} : { fontWeight }),
+    fills,
+    textDecoration,
+    textCase,
+    ...(lineHeight === undefined || lineHeight.unit === 'AUTO' ? {} : { lineHeight }),
+    ...(letterSpacing === undefined || letterSpacing.value === 0 ? {} : { letterSpacing }),
+    ...(styleIds === undefined ? {} : { styleIds }),
+  };
+};
+
+const normalizeTextSegments = (
+  raw: UnknownRecord,
+  text: UnknownRecord,
+  characters: string,
+): SerializedTextSegment[] | undefined => {
+  if (!Array.isArray(text.characterStyleIDs) || !Array.isArray(text.styleOverrideTable)) {
+    return undefined;
+  }
+  const characterStyleIds = text.characterStyleIDs;
+  if (
+    characterStyleIds.length > characters.length ||
+    !characterStyleIds.every(id => typeof id === 'number' && Number.isInteger(id) && id >= 0)
+  ) {
+    return undefined;
+  }
+
+  const overrides = new Map<number, UnknownRecord>();
+  for (const item of text.styleOverrideTable) {
+    const override = record(item);
+    const styleId = finiteNumber(override?.styleID);
+    if (
+      override === null ||
+      styleId === undefined ||
+      !Number.isInteger(styleId) ||
+      styleId <= 0 ||
+      overrides.has(styleId)
+    ) {
+      return undefined;
+    }
+    overrides.set(styleId, override);
+  }
+
+  const styleIds = Array.from(
+    { length: characters.length },
+    (_, index) => (characterStyleIds[index] as number | undefined) ?? 0,
+  );
+  const distinctStyleIds = new Set(styleIds);
+  if (distinctStyleIds.size < 2) return undefined;
+  for (const styleId of distinctStyleIds) {
+    if (styleId !== 0 && !overrides.has(styleId)) return undefined;
+  }
+
+  // Figma text offsets use UTF-16 indices. Never manufacture a run boundary inside a surrogate pair
+  // if a malformed/cross-version payload assigns its two code units different style ids.
+  for (let index = 1; index < characters.length; index += 1) {
+    const previous = characters.charCodeAt(index - 1);
+    const current = characters.charCodeAt(index);
+    if (
+      previous >= 0xd800 &&
+      previous <= 0xdbff &&
+      current >= 0xdc00 &&
+      current <= 0xdfff &&
+      styleIds[index - 1] !== styleIds[index]
+    ) {
+      return undefined;
+    }
+  }
+
+  const resolvedStyles = new Map<number, NormalizedTextStyle>();
+  for (const styleId of distinctStyleIds) {
+    const style = normalizeTextStyle(raw, text, styleId === 0 ? undefined : overrides.get(styleId));
+    if (style === undefined) return undefined;
+    resolvedStyles.set(styleId, style);
+  }
+
+  const segments: SerializedTextSegment[] = [];
+  let start = 0;
+  for (let end = 1; end <= characters.length; end += 1) {
+    if (end < characters.length && styleIds[end] === styleIds[start]) continue;
+    const style = resolvedStyles.get(styleIds[start] as number);
+    if (style === undefined) return undefined;
+    segments.push({
+      characters: characters.slice(start, end),
+      start,
+      end,
+      ...style,
+    });
+    start = end;
+  }
+  return segments;
+};
+
+const parentId = (raw: UnknownRecord): string | null => {
+  const parent = record(raw.parentIndex);
+  const guid = record(parent?.guid) as KiwiGuid | null;
+  return guid === null ? null : nodeId(guid);
+};
+
+const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
+  const text = record(raw.textData);
+  if (text === null) return;
+  const characters = typeof text.characters === 'string' ? text.characters : undefined;
+  const fontSize = finiteNumber(raw.fontSize ?? text.fontSize);
+  const fontName = normalizeFontName(raw.fontName ?? text.fontName);
+  const fontWeight =
+    finiteNumber(raw.fontWeight ?? text.fontWeight ?? fontName?.variationSettings?.wght) ??
+    (fontName === undefined ? undefined : matchingFontWeight(raw, text, fontName));
   if (characters !== undefined) output.characters = characters;
   if (fontSize !== undefined) output.fontSize = fontSize;
-  if (family !== undefined && style !== undefined) {
-    output.fontName = {
-      family,
-      style,
-      ...(postScriptName === undefined ? {} : { postScriptName }),
-      ...(variations === undefined || Object.keys(variations).length === 0
-        ? {}
-        : { variationSettings: variations }),
-    };
-  }
+  if (fontName !== undefined) output.fontName = fontName;
   if (fontWeight !== undefined) output.fontWeight = fontWeight;
   for (const [sourceKey, targetKey] of [
     ['textAlignHorizontal', 'textAlignHorizontal'],
@@ -289,6 +438,26 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
   if (paragraphSpacing !== undefined) output.paragraphSpacing = paragraphSpacing;
   if (paragraphIndent !== undefined) output.paragraphIndent = paragraphIndent;
   if (maxLines !== undefined) output.maxLines = maxLines;
+
+  if (characters !== undefined) {
+    const segments = normalizeTextSegments(raw, text, characters);
+    if (segments !== undefined) {
+      output.segments = segments;
+      for (const key of [
+        'fontName',
+        'fontSize',
+        'fontWeight',
+        'fills',
+        'textDecoration',
+        'textCase',
+        'lineHeight',
+        'letterSpacing',
+      ] as const) {
+        const first = segments[0]?.[key];
+        if (segments.some(segment => !sameValue(segment[key], first))) output[key] = MIXED;
+      }
+    }
+  }
 };
 
 const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {

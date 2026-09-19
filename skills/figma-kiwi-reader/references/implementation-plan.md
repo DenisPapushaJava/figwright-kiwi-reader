@@ -75,7 +75,9 @@ properties plus `symbolOverrides` / `derivedSymbolData`. Boolean visibility prop
 verified variant axes are normalized, and variant masters carry their component-set identity for
 grounding. Instance swaps encoded as explicit `overriddenSymbolID` values resolve to the swapped
 master and subtree; Kiwi does not always expose their property-definition names, which remain
-deliberately unnamed. Variable-bound slots, tokens, mixed text and remaining assets are still open.
+deliberately unnamed. Mixed text runs now preserve the proven style-override fields (font face,
+size, numeric weight, fill, spacing, case and decoration) with exact UTF-16 ranges. Per-run links,
+lists, variable bindings, variable-bound slots, tokens and remaining assets are still open.
 
 Create a pure normalizer that emits the existing `SerializedNode` contract from `@figwright/shared`.
 Start with properties already observed live:

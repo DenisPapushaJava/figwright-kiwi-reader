@@ -335,6 +335,8 @@ export const SerializedTextSegmentSchema = z.object({
   end: z.number(),
   fontName: SerializedFontNameSchema,
   fontSize: z.number(),
+  /** Exact CSS/OpenType weight when the source exposes it independently from the face name. */
+  fontWeight: z.number().optional(),
   fills: z.array(SerializedPaintSchema),
   textDecoration: z.string(),
   textCase: z.string(),

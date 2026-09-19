@@ -66,6 +66,12 @@ paints, effects, text and auto-layout fields already confirmed on live Kiwi traf
 `editInfo`, glyph caches and other private or high-volume wire fields. A response above the hard
 payload budget becomes a section plan so an agent can request individual child sections.
 
+Mixed-style text is reconstructed from Kiwi's per-character style ids and explicit override table.
+Each uniform run carries its exact UTF-16 range, font face, size, numeric weight when metadata is
+available, fills, line height, letter spacing, case and decoration. A malformed or incomplete table
+is ignored as a whole instead of emitting partially styled text. Per-run links, lists, variable
+bindings and OpenType features remain outside this slice and are reported as caveats.
+
 Component instances whose children are implicit in Kiwi are expanded from their referenced
 `SYMBOL` definition. The reader applies component text-property assignments, explicit
 `symbolOverrides`, and Figma's resolved `derivedSymbolData` without mutating the cached master.
