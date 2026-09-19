@@ -11,3 +11,6 @@ export const canForwardImageBody: (
   base64Encoded: boolean,
   bridgeBufferedAmount: number,
 ) => boolean;
+export const captureReloadOptions: (captureImages: boolean) => {
+  ignoreCache: boolean;
+};

@@ -31,3 +31,7 @@ export const decodedBodySize = (body, base64Encoded) => {
 export const canForwardImageBody = (body, base64Encoded, bridgeBufferedAmount) =>
   decodedBodySize(body, base64Encoded) <= MAX_IMAGE_BODY_BYTES &&
   bridgeBufferedAmount <= MAX_IMAGE_BRIDGE_BUFFER_BYTES;
+
+export const captureReloadOptions = captureImages => ({
+  ignoreCache: captureImages === true,
+});

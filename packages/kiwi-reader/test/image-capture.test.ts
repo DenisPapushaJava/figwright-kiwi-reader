@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   canForwardImageBody,
+  captureReloadOptions,
   decodedBodySize,
   imageResponseMetadata,
   MAX_IMAGE_BODY_BYTES,
@@ -9,6 +10,11 @@ import {
 } from '../extension/image-capture.js';
 
 describe('image response capture limits', () => {
+  it('bypasses the browser cache only for opt-in raster capture', () => {
+    expect(captureReloadOptions(false)).toEqual({ ignoreCache: false });
+    expect(captureReloadOptions(true)).toEqual({ ignoreCache: true });
+  });
+
   it('accepts only HTTP image responses', () => {
     expect(
       imageResponseMetadata({

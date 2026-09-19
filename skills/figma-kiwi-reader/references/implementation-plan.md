@@ -171,7 +171,8 @@ Implementation status (2026-09-19):
 
 - **Implemented:** bounded message-local blob preservation; command/vector-network decoding;
   content-addressed SVG and raster asset pack; optional `image/*` CDP body capture (off by default in
-  the extension UI); versioned design-context/capability report; viewport reference capture; exact
+  the extension UI, with an uncached reload only when opted in); versioned
+  design-context/capability report; viewport reference capture; exact
   PNG diff with heatmap, changed-pixel ratio and bounding box; numeric font weight, PostScript name,
   variable axes, min/max sizing, aspect ratio, overflow/fixed children, truncation/max-lines/wrap;
   UI/service-worker capability detection for unpacked-extension reload skew.

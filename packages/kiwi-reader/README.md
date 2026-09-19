@@ -76,7 +76,9 @@ Reopen either surface to see the current counters, recapture the file, or detach
 Raster image capture is opt-in and disabled by default. Enable **Захватывать растровые
 изображения** before connecting or recapturing when the selected design needs original photo/image
 bytes. The option is persisted in `chrome.storage.local`; only eligible `image/*` response bodies
-observed during the following reload are forwarded.
+observed during the following reload are forwarded. An opt-in raster recapture bypasses Chrome's
+HTTP cache so repeated captures can obtain the response bodies instead of silently losing cached
+images; ordinary structure-only captures keep the cache enabled.
 
 After changing files in the unpacked extension directory, press **Reload** on the extension card at
 `chrome://extensions` and reopen the popup or side panel. Chrome can otherwise keep the previous

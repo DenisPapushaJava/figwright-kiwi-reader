@@ -1,6 +1,10 @@
 import { waitForWebSocketOpen } from './bridge-connection.js';
 import { frameBudgetError } from './frame-budget.js';
-import { canForwardImageBody, imageResponseMetadata } from './image-capture.js';
+import {
+  canForwardImageBody,
+  captureReloadOptions,
+  imageResponseMetadata,
+} from './image-capture.js';
 
 const BRIDGE_URL = 'ws://127.0.0.1:9224';
 const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
@@ -229,7 +233,11 @@ const resyncAttachedTabs = async () => {
         await sendHello(tabId, true);
         await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
         scheduleCaptureTimeout(tabId);
-        await chrome.debugger.sendCommand({ tabId }, 'Page.reload', { ignoreCache: false });
+        await chrome.debugger.sendCommand(
+          { tabId },
+          'Page.reload',
+          captureReloadOptions(captureImages),
+        );
       } catch (error) {
         console.error('[Figwright Kiwi Reader] reconnect', error);
         await reportError(tabId, 'CAPTURE_RESTART_FAILED', error);
@@ -379,7 +387,7 @@ const reloadCapture = async tabId => {
   await sendHello(tabId, true);
   await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
   scheduleCaptureTimeout(tabId);
-  await chrome.debugger.sendCommand({ tabId }, 'Page.reload', { ignoreCache: false });
+  await chrome.debugger.sendCommand({ tabId }, 'Page.reload', captureReloadOptions(captureImages));
 };
 
 const captureImageResponse = async (tabId, requestId, metadata) => {
