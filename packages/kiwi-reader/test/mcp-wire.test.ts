@@ -143,6 +143,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         '<svg><path fill="currentColor" d="M0 0h1v1H0z"/></svg>',
         'utf8',
       ),
+      writeFile(join(assetDirectory, 'tokens.css'), ':root { --color-brand: #6266f0; }\n', 'utf8'),
     ]);
     child.stderr.on('data', (data: Buffer) => {
       stderr += data.toString('utf8');
@@ -205,6 +206,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         'scan_components',
         'component_map',
         'icon_map',
+        'token_map',
         'save_assets',
         'capture_reference',
         'compare_screenshots',
@@ -355,6 +357,20 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         }),
       );
       expect(iconMap).toMatchObject({ mappings: [], svgFileCount: 1 });
+
+      const tokenMap = parseToolText(
+        await send('tools/call', {
+          name: 'token_map',
+          arguments: { nodeId: '6:140', rootDir: assetDirectory },
+        }),
+      );
+      expect(tokenMap).toMatchObject({
+        mappings: [],
+        projectTokenCount: 1,
+        tokenFiles: ['tokens.css'],
+        scanMode: 'portable-css-scss',
+        variableBindings: 'unavailable',
+      });
 
       const saved = parseToolText(
         await send('tools/call', {
@@ -599,7 +615,13 @@ describe.skipIf(!existsSync(HUB_ENTRY))('Kiwi shared MCP hub (built dist)', () =
       };
       expect(listedResult.tools.map(tool => tool.name)).not.toContain('use_file');
       expect(listedResult.tools.map(tool => tool.name)).toEqual(
-        expect.arrayContaining(['analyze_project', 'scan_components', 'component_map', 'icon_map']),
+        expect.arrayContaining([
+          'analyze_project',
+          'scan_components',
+          'component_map',
+          'icon_map',
+          'token_map',
+        ]),
       );
       expect(listedResult.tools.find(tool => tool.name === 'get_selection')).toMatchObject({
         inputSchema: {

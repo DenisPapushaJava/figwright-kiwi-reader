@@ -357,14 +357,17 @@ renderer/font antialiasing differences from structural, typography and missing-a
 
 ## Phase 6: tokens, components and codegen integration
 
-Status: component and icon grounding are available through the isolated Kiwi MCP. They reuse the
-existing pure Figwright joins against a portable, gitignore-aware project index. The standalone
-bundle confirms component exports and names but deliberately leaves prop coverage unknown instead
-of shipping the native AST parser; explicit component-map overrides still work and stale targets are
-reported. Variable/style resolution, `token_map`, the codegen skill handoff and live UI-kit parity
-remain open.
+Status: component, icon, and observed-color token grounding are available through the isolated Kiwi
+MCP. They reuse existing pure Figwright scanners against a portable, gitignore-aware project index.
+The standalone bundle confirms component exports and names but deliberately leaves prop coverage
+unknown instead of shipping the native AST parser; explicit component-map overrides still work and
+stale targets are reported. `token_map` scans CSS custom properties and SCSS variables, then reports
+exact color-value matches as medium-confidence, name-blind candidates. Stable shared-style ids are
+surfaced as opaque references. Figma variable/style-name resolution, JS/TS token configs, the codegen
+skill handoff and live UI-kit parity remain open.
 
-- Resolve shared style references to stable names and values.
+- Resolve shared style references to stable names and values when wire evidence becomes available;
+  until then preserve their ids and keep value-only project matches explicitly provisional.
 - Build variable collections/modes only when the wire data proves them; do not invent REST-only
   metadata.
 - Normalize component sets, variants, booleans, text props and instance swaps.

@@ -43,9 +43,11 @@ unless current evidence requires a change; when that happens, update the plan wi
   initial `CREATED` snapshot.
 - Compare the same real node through Kiwi and the ordinary Figwright plugin whenever plugin access
   is available. A screenshot is supporting evidence, not the structural oracle.
-- Before generating code in a project with an existing UI kit, call `component_map` and `icon_map`
-  with that project's `rootDir`. Reuse high-confidence matches; verify medium matches; never infer
-  missing component props when the result reports the portable name-only scan caveat.
+- Before generating code in a project with an existing UI kit, call `component_map`, `icon_map`, and
+  `token_map` with that project's `rootDir`. Reuse high-confidence component/icon matches and verify
+  medium matches. Treat every Kiwi token candidate marked `matchedBy: ['value']` as name-blind reuse
+  evidence, not a proven Figma binding. Never infer missing component props when the result reports
+  the portable name-only scan caveat.
 - After changes to `mcp` or `shared`, build before live testing because the server runs `dist`.
 - Run the repository's canonical root gates before completion: `corepack pnpm typecheck`, `lint`,
   `format:check`, `knip`, `build`, and `test`.

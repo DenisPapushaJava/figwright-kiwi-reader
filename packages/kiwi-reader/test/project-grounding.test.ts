@@ -11,6 +11,7 @@ import {
   mapProjectIcons,
   scanPortableComponents,
 } from '../src/project-grounding.js';
+import { mapProjectTokens } from '../src/token-grounding.js';
 
 const roots: string[] = [];
 
@@ -189,5 +190,138 @@ describe('portable Kiwi project grounding', () => {
       ],
     });
     expect(result.mappings[0]?.candidate?.recolor).toContain('text-{token}');
+  });
+
+  it('maps observed colors to portable CSS and SCSS tokens without claiming Figma bindings', async () => {
+    const rootDir = await projectFixture();
+    await Promise.all([
+      writeFile(
+        join(rootDir, 'src', 'tokens.css'),
+        `@theme { --color-brand: #6266f080; --color-text: #123456; }\n:root { --surface: #fff; --paper: #fff; --canvas: #fff; --white: #fff; }\n`,
+        'utf8',
+      ),
+      writeFile(join(rootDir, 'src', '_tokens.scss'), '$shadow: #00000066;\n', 'utf8'),
+      writeFile(join(rootDir, 'src', 'ignored.css'), ':root { --ignored: #abcdef; }\n', 'utf8'),
+      writeFile(join(rootDir, '.gitignore'), 'src/Ignored.tsx\nsrc/ignored.css\n', 'utf8'),
+    ]);
+    const design: DesignContextNode = {
+      id: '4:1',
+      name: 'Card',
+      type: 'FRAME',
+      styleIds: { fill: 'S:fill', effect: 'S:effect' },
+      fills: [
+        {
+          type: 'SOLID',
+          visible: true,
+          opacity: 0.5,
+          color: { r: 0x62 / 255, g: 0x66 / 255, b: 0xf0 / 255 },
+        },
+      ],
+      effects: [
+        {
+          type: 'DROP_SHADOW',
+          visible: true,
+          color: { r: 0, g: 0, b: 0, a: 0.4 },
+        },
+      ],
+      children: [
+        {
+          id: '4:2',
+          name: 'Gradient',
+          type: 'RECTANGLE',
+          fills: [
+            {
+              type: 'GRADIENT_LINEAR',
+              visible: true,
+              opacity: 1,
+              gradientStops: [
+                { position: 0, color: { r: 1, g: 1, b: 1, a: 1 } },
+                { position: 1, color: { r: 0xab / 255, g: 0xcd / 255, b: 0xef / 255, a: 1 } },
+              ],
+              gradientTransform: [
+                [1, 0, 0],
+                [0, 1, 0],
+              ],
+            },
+          ],
+        },
+        {
+          id: '4:3',
+          name: 'Mixed text',
+          type: 'TEXT',
+          segments: [
+            {
+              characters: 'Hello',
+              start: 0,
+              end: 5,
+              fontName: { family: 'Inter', style: 'Regular' },
+              fontSize: 16,
+              fills: [{ type: 'SOLID', color: '#123456' }],
+              textDecoration: 'NONE',
+              textCase: 'ORIGINAL',
+              styleIds: { fill: 'S:text-fill', text: 'S:text' },
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await mapProjectTokens({ roots: [design], rootDir });
+
+    expect(result).toMatchObject({
+      scanMode: 'portable-css-scss',
+      variableBindings: 'unavailable',
+      unresolvedStyleRefs: [
+        { id: 'S:effect', slots: ['effect'], nodeIds: ['4:1'] },
+        { id: 'S:fill', slots: ['fill'], nodeIds: ['4:1'] },
+        { id: 'S:text', slots: ['text'], nodeIds: ['4:3'] },
+        { id: 'S:text-fill', slots: ['fill'], nodeIds: ['4:3'] },
+      ],
+    });
+    expect(result.tokenFiles).toEqual(['src/_tokens.scss', 'src/tokens.css']);
+    expect(result.mappings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          figmaValue: '#6266F080',
+          properties: ['fills'],
+          styleRefs: ['S:fill'],
+          status: 'medium',
+          candidate: expect.objectContaining({
+            token: 'color-brand',
+            ref: 'brand',
+            matchedBy: ['value'],
+          }),
+        }),
+        expect.objectContaining({
+          figmaValue: '#00000066',
+          properties: ['effects'],
+          status: 'medium',
+          candidate: expect.objectContaining({
+            token: 'shadow',
+            ref: '$shadow',
+            from: 'src/_tokens.scss',
+          }),
+        }),
+        expect.objectContaining({
+          figmaValue: '#123456',
+          properties: ['segments.fills'],
+          styleRefs: ['S:text-fill'],
+          status: 'medium',
+          candidate: expect.objectContaining({ token: 'color-text', ref: 'text' }),
+        }),
+        expect.objectContaining({
+          figmaValue: '#FFFFFF',
+          properties: ['fills.gradientStops'],
+          status: 'ambiguous',
+          candidateCount: 4,
+        }),
+        expect.objectContaining({ figmaValue: '#ABCDEF', status: 'unmapped' }),
+      ]),
+    );
+    expect(
+      result.mappings.find(mapping => mapping.figmaValue === '#FFFFFF')?.candidates,
+    ).toBeUndefined();
+    expect(result.unmapped).toContain('#ABCDEF');
+    expect(result.caveats.join(' ')).toContain('value equality only');
   });
 });

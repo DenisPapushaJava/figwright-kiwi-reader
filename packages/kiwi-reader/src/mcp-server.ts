@@ -24,6 +24,7 @@ import {
 } from './project-grounding.js';
 import { saveReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, type CapturedNode } from './scenegraph.js';
+import { mapProjectTokens } from './token-grounding.js';
 
 const DEFAULT_MAX_NODES = 2_000;
 const DEFAULT_MAX_DEPTH = 12;
@@ -585,6 +586,39 @@ export const createKiwiMcpServer = (
           roots: grounded.roots,
           rootDir: rootDir ?? process.cwd(),
           ...(threshold === undefined ? {} : { threshold }),
+          captureCaveats: grounded.caveats,
+        }),
+      );
+    },
+  );
+
+  server.registerTool(
+    'token_map',
+    {
+      description:
+        'Map colors observed in the selected Figma subtree to CSS custom properties and SCSS variables ' +
+        'in the local project. Browser Kiwi cannot resolve Figma variable or shared-style names, so ' +
+        'every match is explicitly value-only and ambiguous same-value tokens remain unresolved.',
+      inputSchema: z.object({
+        nodeId: z.string().optional(),
+        depth: z.number().int().min(0).max(32).optional(),
+        rootDir: z.string().min(1).optional(),
+        tabId: z.number().int().optional(),
+        fileKey: z.string().optional(),
+      }),
+      annotations: READ_ONLY,
+    },
+    async ({ nodeId, depth, rootDir, tabId, fileKey }) => {
+      const grounded = groundingRoots(capture, routing, {
+        ...(nodeId === undefined ? {} : { nodeId }),
+        ...(depth === undefined ? {} : { depth }),
+        ...(tabId === undefined ? {} : { tabId }),
+        ...(fileKey === undefined ? {} : { fileKey }),
+      });
+      return textResult(
+        await mapProjectTokens({
+          roots: grounded.roots,
+          rootDir: rootDir ?? process.cwd(),
           captureCaveats: grounded.caveats,
         }),
       );
