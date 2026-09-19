@@ -183,6 +183,7 @@ export interface DesignContextNode {
   annotations?: readonly SerializedAnnotation[];
   characters?: string;
   fontSize?: number | typeof MIXED;
+  fontWeight?: number | typeof MIXED;
   fontName?: z.infer<typeof SerializedFontNameSchema> | typeof MIXED;
   // Typography that a Figma *text style* captures — folded into the `textStyle` bundle by dedup
   // (like fontSize/fontName) so a style shared by N nodes costs one entry. Surfaced because codegen
@@ -364,6 +365,7 @@ export const DesignContextNodeSchema = z.lazy(() =>
     annotations: z.array(SerializedAnnotationSchema).optional(),
     characters: z.string().optional(),
     fontSize: z.union([z.number(), z.literal(MIXED)]).optional(),
+    fontWeight: z.union([z.number(), z.literal(MIXED)]).optional(),
     fontName: z.union([SerializedFontNameSchema, z.literal(MIXED)]).optional(),
     lineHeight: z.union([SerializedLineHeightSchema, z.literal(MIXED)]).optional(),
     letterSpacing: z.union([SerializedLetterSpacingSchema, z.literal(MIXED)]).optional(),

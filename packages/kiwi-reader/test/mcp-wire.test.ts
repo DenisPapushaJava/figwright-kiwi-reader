@@ -1,8 +1,10 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { zstdCompressSync } from 'node:zlib';
 
@@ -100,6 +102,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
     let nextId = 1;
     const pending = new Map<number, (value: Record<string, unknown>) => void>();
     let extensionSocket: WebSocket | null = null;
+    const assetDirectory = await mkdtemp(join(tmpdir(), 'figwright-kiwi-wire-assets-'));
     child.stderr.on('data', (data: Buffer) => {
       stderr += data.toString('utf8');
     });
@@ -157,6 +160,9 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         'get_selection',
         'get_node',
         'get_design_context',
+        'save_assets',
+        'capture_reference',
+        'compare_screenshots',
       ]);
 
       const status = await send('tools/call', { name: 'browser_status', arguments: {} });
@@ -192,6 +198,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           tabId: 17,
           url: 'https://www.figma.com/design/file/Test?node-id=6-140',
           title: 'Test – Figma',
+          captureImages: true,
         }),
       );
       extensionSocket.send(
@@ -231,8 +238,79 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         }),
       );
       expect(context).toMatchObject({
+        schemaVersion: 'figwright-kiwi-context@1',
         nodes: [{ id: '6:140', children: [{ id: '6:141', name: 'Child' }] }],
         capture: { provider: 'kiwi-browser', fileKey: 'file', tabId: 17, truncated: false },
+        capabilities: { vectorAssets: 'not-present', rasterImages: 'not-present' },
+        assets: { summary: { vectors: 0, images: 0 } },
+      });
+
+      const saved = parseToolText(
+        await send('tools/call', {
+          name: 'save_assets',
+          arguments: { nodeId: '6:140', depth: 2, outDir: assetDirectory },
+        }),
+      );
+      expect(saved).toMatchObject({
+        schemaVersion: 'figwright-kiwi-assets@1',
+        assets: 0,
+        usages: 0,
+        missing: [],
+      });
+      const savedManifest = JSON.parse(
+        await readFile(join(assetDirectory, 'assets.manifest.json'), 'utf8'),
+      ) as Record<string, unknown>;
+      expect(savedManifest).toMatchObject({
+        schemaVersion: 'figwright-kiwi-assets@1',
+        source: { provider: 'kiwi-browser', fileKey: 'file', rootNodeId: '6:140' },
+      });
+
+      const referencePath = join(assetDirectory, 'reference.png');
+      const referenceRequest = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for reference request')),
+          5_000,
+        );
+        extensionSocket?.on('message', data => {
+          const message = JSON.parse(data.toString()) as {
+            type?: string;
+            requestId?: string;
+            tabId?: number;
+          };
+          if (message.type !== 'capture-reference-request' || message.requestId === undefined)
+            return;
+          clearTimeout(timeout);
+          const png = new Uint8Array(24);
+          png.set([137, 80, 78, 71, 13, 10, 26, 10]);
+          png.set([0, 0, 0, 13, 73, 72, 68, 82], 8);
+          const view = new DataView(png.buffer);
+          view.setUint32(16, 1280, false);
+          view.setUint32(20, 720, false);
+          extensionSocket?.send(
+            JSON.stringify({
+              type: 'capture-reference',
+              tabId: message.tabId,
+              requestId: message.requestId,
+              payload: Buffer.from(png).toString('base64'),
+              viewport: { width: 1280, height: 720, pageX: 0, pageY: 0 },
+            }),
+          );
+          resolve();
+        });
+      });
+      const reference = parseToolText(
+        await send('tools/call', {
+          name: 'capture_reference',
+          arguments: { tabId: 17, outPath: referencePath },
+        }),
+      );
+      await referenceRequest;
+      expect(reference).toMatchObject({
+        schemaVersion: 'figwright-kiwi-reference@1',
+        imagePath: referencePath,
+        width: 1280,
+        height: 720,
+        cropConfidence: 'viewport-only',
       });
 
       const largeFixture = captureFixture(true);
@@ -261,6 +339,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           tabId: 17,
           reset: true,
           url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+          captureImages: true,
         }),
       );
       extensionSocket.send(
@@ -291,6 +370,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         clearTimeout(timeout);
       }
       expect(code).toBe(0);
+      await rm(assetDirectory, { recursive: true, force: true });
     }
   }, 30_000);
 });

@@ -126,6 +126,8 @@ export type SerializedPaint = z.infer<typeof SerializedPaintSchema>;
 export const SerializedFontNameSchema = z.object({
   family: z.string(),
   style: z.string(),
+  /** Exact PostScript face name when the source exposes it (useful for deterministic font matching). */
+  postScriptName: z.string().optional(),
   /**
    * Variable-font axis values keyed by OpenType axis tag — `{ wght: 650, slnt: -5 }`, the same
    * shape as CSS `font-variation-settings`. Figma reports every axis the family defines, not just
@@ -464,6 +466,8 @@ export interface SerializedNode {
   // text typography
   characters?: string;
   fontSize?: number | Mixed;
+  /** Numeric source weight when the protocol exposes it; avoids guessing from a style label. */
+  fontWeight?: number | Mixed;
   fontName?: SerializedFontName | Mixed;
   textAlignHorizontal?: string;
   textAlignVertical?: string;
@@ -568,6 +572,7 @@ export const SerializedNodeSchema = z.lazy(() =>
     mainComponent: SerializedMainComponentSchema.optional(),
     characters: z.string().optional(),
     fontSize: z.union([z.number(), z.literal(MIXED)]).optional(),
+    fontWeight: z.union([z.number(), z.literal(MIXED)]).optional(),
     fontName: z.union([SerializedFontNameSchema, z.literal(MIXED)]).optional(),
     textAlignHorizontal: z.string().optional(),
     textAlignVertical: z.string().optional(),

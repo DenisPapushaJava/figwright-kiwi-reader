@@ -1,19 +1,28 @@
 import { waitForWebSocketOpen } from './bridge-connection.js';
 import { frameBudgetError } from './frame-budget.js';
+import { canForwardImageBody, imageResponseMetadata } from './image-capture.js';
 
 const BRIDGE_URL = 'ws://127.0.0.1:9224';
 const BRIDGE_CONNECT_TIMEOUT_MS = 5_000;
 const CAPTURE_TIMEOUT_MS = 20_000;
+const MAX_REFERENCE_PAYLOAD_CHARS = 45 * 1024 * 1024;
 const attachedTabs = new Set();
 const tabStates = new Map();
 const readyTimers = new Map();
 const captureTimers = new Map();
 const blockedFrameTabs = new Set();
+const imageRequests = new Map();
+const sentImageUrls = new Map();
 let bridge = null;
 let connecting = null;
 let keepAlive = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000;
+let captureImages = false;
+const optionsReady = chrome.storage.local.get({ captureImages: false }).then(options => {
+  captureImages = options.captureImages === true;
+  return undefined;
+});
 
 const initialState = tabId => ({
   tabId,
@@ -27,6 +36,8 @@ const initialState = tabId => ({
   nodes: 0,
   decodedFrames: 0,
   ignoredFrames: 0,
+  captureImages,
+  captureOptionsSupported: true,
   errorCode: null,
   errorMessage: null,
 });
@@ -90,6 +101,8 @@ const closeBridgeIfIdle = () => {
 const removeAttachedTab = (tabId, publish = true) => {
   clearTabTimers(tabId);
   blockedFrameTabs.delete(tabId);
+  imageRequests.delete(tabId);
+  sentImageUrls.delete(tabId);
   const wasAttached = attachedTabs.delete(tabId);
   if (wasAttached) send({ type: 'detach', tabId });
   if (publish) void publishState(tabId, initialState(tabId));
@@ -100,7 +113,7 @@ const removeAttachedTab = (tabId, publish = true) => {
 const sendHello = async (tabId, reset = false) => {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.url?.startsWith('https://www.figma.com/')) return;
-  send({ type: 'hello', tabId, url: tab.url, title: tab.title, reset });
+  send({ type: 'hello', tabId, url: tab.url, title: tab.title, reset, captureImages });
   await publishState(tabId, { title: tab.title ?? null });
 };
 
@@ -162,6 +175,7 @@ const applyCaptureStatus = session => {
     nodes: session.nodes,
     decodedFrames: session.decodedFrames,
     ignoredFrames: session.ignoredFrames,
+    captureImages: session.captureImages ?? captureImages,
     errorCode: null,
     errorMessage: null,
   });
@@ -224,6 +238,56 @@ const resyncAttachedTabs = async () => {
   );
 };
 
+const captureReference = async message => {
+  const tabId = Number(message.tabId);
+  const requestId = message.requestId;
+  if (!Number.isInteger(tabId) || typeof requestId !== 'string' || !attachedTabs.has(tabId)) {
+    return;
+  }
+  try {
+    const metrics = await chrome.debugger.sendCommand({ tabId }, 'Page.getLayoutMetrics');
+    const viewport = metrics?.cssVisualViewport;
+    if (
+      typeof viewport?.clientWidth !== 'number' ||
+      typeof viewport?.clientHeight !== 'number' ||
+      typeof viewport?.pageX !== 'number' ||
+      typeof viewport?.pageY !== 'number'
+    ) {
+      throw new Error('Chrome did not return viewport metrics');
+    }
+    const screenshot = await chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', {
+      format: 'png',
+      fromSurface: true,
+      captureBeyondViewport: false,
+    });
+    if (
+      typeof screenshot?.data !== 'string' ||
+      screenshot.data.length > MAX_REFERENCE_PAYLOAD_CHARS
+    ) {
+      throw new Error('Viewport screenshot exceeds the 32 MiB capture limit');
+    }
+    send({
+      type: 'capture-reference',
+      tabId,
+      requestId,
+      payload: screenshot.data,
+      viewport: {
+        width: viewport.clientWidth,
+        height: viewport.clientHeight,
+        pageX: viewport.pageX,
+        pageY: viewport.pageY,
+      },
+    });
+  } catch (error) {
+    send({
+      type: 'capture-reference-error',
+      tabId,
+      requestId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
 const connectBridge = () => {
   if (bridge?.readyState === WebSocket.OPEN) return Promise.resolve();
   if (connecting !== null) return connecting;
@@ -234,6 +298,7 @@ const connectBridge = () => {
     try {
       const message = JSON.parse(event.data);
       if (message.type === 'capture-status') applyCaptureStatus(message.session);
+      if (message.type === 'capture-reference-request') void captureReference(message);
       if (message.type === 'capture-error' && attachedTabs.has(message.tabId)) {
         clearTabTimers(message.tabId);
         void publishState(message.tabId, {
@@ -296,8 +361,11 @@ const connectBridge = () => {
 };
 
 const reloadCapture = async tabId => {
+  await optionsReady;
   clearTabTimers(tabId);
   blockedFrameTabs.delete(tabId);
+  imageRequests.set(tabId, new Map());
+  sentImageUrls.set(tabId, new Set());
   await publishState(tabId, {
     phase: 'reloading',
     errorCode: null,
@@ -306,6 +374,7 @@ const reloadCapture = async tabId => {
     nodes: 0,
     decodedFrames: 0,
     ignoredFrames: 0,
+    captureImages,
   });
   await sendHello(tabId, true);
   await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
@@ -313,7 +382,37 @@ const reloadCapture = async tabId => {
   await chrome.debugger.sendCommand({ tabId }, 'Page.reload', { ignoreCache: false });
 };
 
+const captureImageResponse = async (tabId, requestId, metadata) => {
+  try {
+    const response = await chrome.debugger.sendCommand({ tabId }, 'Network.getResponseBody', {
+      requestId,
+    });
+    if (
+      typeof response?.body !== 'string' ||
+      typeof response?.base64Encoded !== 'boolean' ||
+      !captureImages ||
+      !canForwardImageBody(response.body, response.base64Encoded, bridge?.bufferedAmount ?? 0)
+    ) {
+      return;
+    }
+    const sent = sentImageUrls.get(tabId);
+    if (sent?.has(metadata.url)) return;
+    sent?.add(metadata.url);
+    send({
+      type: 'asset',
+      tabId,
+      url: metadata.url,
+      mimeType: metadata.mimeType,
+      payload: response.body,
+      base64Encoded: response.base64Encoded,
+    });
+  } catch {
+    // Cached, redirected or evicted bodies are allowed to remain unresolved in the asset report.
+  }
+};
+
 const attach = async tab => {
+  await optionsReady;
   if (!tab.id || !tab.url?.startsWith('https://www.figma.com/')) {
     throw Object.assign(new Error('Откройте макет Figma в активной вкладке'), {
       code: 'NOT_FIGMA_TAB',
@@ -367,14 +466,29 @@ const detach = async tabId => {
 };
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (!message || !['get-state', 'connect', 'recapture', 'disconnect'].includes(message.type)) {
+  if (
+    !message ||
+    !['get-state', 'connect', 'recapture', 'disconnect', 'set-capture-options'].includes(
+      message.type,
+    )
+  ) {
     return false;
   }
 
   void (async () => {
+    await optionsReady;
     const tabId = Number(message.tabId);
     if (!Number.isInteger(tabId)) throw new Error('Не удалось определить вкладку');
     if (message.type === 'get-state') return getState(tabId);
+    if (message.type === 'set-capture-options') {
+      captureImages = message.captureImages !== false;
+      await chrome.storage.local.set({ captureImages });
+      if (!captureImages) {
+        imageRequests.get(tabId)?.clear();
+        sentImageUrls.get(tabId)?.clear();
+      }
+      return publishState(tabId, { captureImages });
+    }
     if (message.type === 'disconnect') {
       await detach(tabId);
       return getState(tabId);
@@ -389,7 +503,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     .catch(async error => {
       const tabId = Number(message.tabId);
       const code = typeof error?.code === 'string' ? error.code : 'UNEXPECTED_EXTENSION_ERROR';
-      if (Number.isInteger(tabId)) await reportError(tabId, code, error);
+      if (Number.isInteger(tabId)) {
+        try {
+          await reportError(tabId, code, error);
+        } catch (reportingError) {
+          console.error('[Figma Kiwi] Failed to publish extension error state:', reportingError);
+        }
+      }
       sendResponse({ ok: false, error: error.message, code });
     });
   return true;
@@ -397,6 +517,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 chrome.debugger.onEvent.addListener((source, method, params) => {
   if (!source.tabId || !attachedTabs.has(source.tabId)) return;
+  if (method === 'Network.responseReceived') {
+    if (!captureImages) return;
+    const metadata = imageResponseMetadata(params);
+    const requests = imageRequests.get(source.tabId);
+    if (metadata !== null && requests !== undefined && requests.size < 5_000) {
+      requests.set(metadata.requestId, metadata);
+    }
+    return;
+  }
+  if (method === 'Network.loadingFailed') {
+    imageRequests.get(source.tabId)?.delete(params.requestId);
+    return;
+  }
+  if (method === 'Network.loadingFinished') {
+    const requests = imageRequests.get(source.tabId);
+    const metadata = requests?.get(params.requestId);
+    requests?.delete(params.requestId);
+    if (metadata !== undefined) {
+      void captureImageResponse(source.tabId, params.requestId, metadata);
+    }
+    return;
+  }
   if (method === 'Network.webSocketFrameReceived' && params.response?.opcode === 2) {
     if (blockedFrameTabs.has(source.tabId)) return;
     const budgetError = frameBudgetError(

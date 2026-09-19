@@ -131,6 +131,7 @@ export const project = (node: SceneNode, detail: DetailLevel): DesignContextNode
   if (flat.annotations !== undefined) out.annotations = flat.annotations;
   if (flat.characters !== undefined) out.characters = flat.characters;
   if (flat.fontSize !== undefined) out.fontSize = flat.fontSize;
+  if (flat.fontWeight !== undefined) out.fontWeight = flat.fontWeight;
   if (flat.fontName !== undefined) out.fontName = flat.fontName;
   // Typography the serializer already computes but get_design_context used to drop — without these
   // codegen eyeballs casing / leading / tracking / underlines / alignment / clamping off the raster.

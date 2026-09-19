@@ -165,31 +165,153 @@ typed read tools initially: existing agents and `figma-codegen` already understa
 schemas prevent ambiguous design queries. Reconsider a consolidated query tool only after measuring
 tool-schema cost against the loss of discoverability and validation.
 
-## Phase 5: vectors, images and visual verification
+## Phase 5: pixel-fidelity pipeline
 
-### Vectors
+Implementation status (2026-09-19):
 
-- Resolve `commandsBlob` and `vectorNetworkBlob` against the `blobs[]` belonging to their source
-  message.
-- Adapt the upstream MIT SVG decoders with attribution and focused tests.
-- Generate computed shapes such as ellipse, star, polygon and rounded rectangle from parameters
-  when no blob exists.
+- **Implemented:** bounded message-local blob preservation; command/vector-network decoding;
+  content-addressed SVG and raster asset pack; optional `image/*` CDP body capture (off by default in
+  the extension UI); versioned design-context/capability report; viewport reference capture; exact
+  PNG diff with heatmap, changed-pixel ratio and bounding box; numeric font weight, PostScript name,
+  variable axes, min/max sizing, aspect ratio, overflow/fixed children, truncation/max-lines/wrap;
+  UI/service-worker capability detection for unpacked-extension reload skew.
+- **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed text runs,
+  variables, non-text instance properties and native node crops. The current exporter records an
+  unsupported-paint warning and never silently substitutes black for an unsupported vector paint.
+- **Live gate still required:** reload the unpacked extension, recapture real files containing a
+  photo, composite icon, variable/mixed text and nested instance, then compare against a native or
+  viewport PNG before marking Phase 5 complete.
 
-### Raster images
+Pixel-perfect is a verification target, not a property of one JSON response. The browser reader
+needs four independent layers so an error in one layer is observable instead of being repeated in
+both the implementation and its reference:
 
-- First preserve image hashes, scale mode, transform and crop metadata in normalized paints.
-- Investigate read-only CDP capture of image response bodies already loaded by the tab.
-- Do not obtain images by exporting cookies or opening a second authenticated multiplayer session.
-- Store assets only when an MCP save/export tool explicitly requests a local destination.
+```text
+Kiwi scenegraph -> exact normalized design context -> HTML/CSS implementation
+Kiwi blobs/network images -> exported asset pack ----^                |
+Figma tab screenshot/native export -> reference image                 |
+rendered implementation screenshot <----------- pixel/structural diff+
+```
 
-### Visual fallback
+The public design context stays small and textual. Vector paths, raster bytes, glyph outlines and
+screenshots live in an asset store and are returned as metadata or written to disk only on an
+explicit save call. Every response reports capabilities and missing fidelity dimensions; the agent
+must never silently redraw an unavailable icon or substitute a placeholder image.
 
-- Add an optional CDP screenshot of the visible Figma tab for comparison.
-- Treat screenshots as verification and fallback context; do not infer layout values from pixels
-  when structured Kiwi data exists.
+### 5A: preserve source-message blobs
 
-Exit criteria: representative vectors export as valid SVG, image-fill metadata round-trips into the
-design context, and unavailable assets are reported rather than silently replaced.
+- Add a bounded, content-addressed blob store per capture session. The decoder currently passes only
+  `nodeChanges` into the scenegraph, so numeric `commandsBlob` / `vectorNetworkBlob` indices lose
+  their owning message as soon as that frame is merged.
+- During ingest, replace known numeric blob indices with internal stable references before merging
+  incremental changes. Keep the references out of `SerializedNode`; expose only asset ids and
+  availability metadata.
+- Cover `fillGeometry`, `strokeGeometry`, `vectorNetworkBlob`, computed text glyph geometry and any
+  image/vector override that points into `message.blobs`.
+- Bound individual blobs, total bytes per tab and asset count. Reset them with the session and report
+  eviction/missing data explicitly.
+- Keep diagnostic counters: blobs received, retained, deduplicated, rejected and unresolved. Once a
+  referenced blob is retained, do not evict it during that capture session.
+
+Exit criteria: a blob referenced by an early frame is still resolvable after later incremental
+updates, two tabs cannot see one another's blobs, and reset/reconnect releases the old store.
+
+### 5B: true vector asset export
+
+- Prefer baked `fillGeometry` / `strokeGeometry` `commandsBlob` paths: they already represent
+  booleans and expanded strokes more faithfully than rebuilding editable vector networks.
+- Use `vectorNetworkBlob` as a centerline/editable-path fallback. Adapt the pinned MIT decoders from
+  `allan-simon/figma-kiwi-protocol`, but add the missing production cases rather than importing its
+  CLI/write surface.
+- Compose parent and child affine transforms, preserve winding rules, stroke caps/joins/dashes,
+  gradients, masks/clip paths, opacity and paint order. Render an entire icon/component subtree to
+  one SVG instead of exporting unrelated child vectors.
+- Generate exact SVG geometry for ellipse/arc, star, polygon, line and rounded rectangle nodes that
+  have parameters but no command blob.
+- Add a read-only `save_assets` MCP tool. Its manifest maps node id to file path, kind, dimensions,
+  checksum and any unsupported feature. Do not inline large SVG paths into design-context JSON.
+
+Reference implementations to evaluate at pinned commits:
+
+- `allan-simon/figma-kiwi-protocol@2bb4d6a9` for the small blob decoders;
+- `echobt/figma-mcp@0e0289a6` for subtree transform composition, masks and asset-pack conventions;
+- `KwiTsukasa/figma-local-context-mcp@7661dc0f` for baked geometry, glyph paths and SVG filters.
+
+All are research inputs. Copy only the smallest read-only MIT-compatible units, retain attribution,
+and test them against live Kiwi frames. Do not add cookie capture, a standalone multiplayer socket,
+mutation code or local `.fig` write support.
+
+Exit criteria: simple and composite icons, nested transforms, masks, boolean shapes and computed
+shapes export as reusable SVG files whose bounds match their normalized nodes.
+
+### 5C: raster image recovery
+
+- Extend normalized image paints with a stable image hash, scale mode, paint transform/crop,
+  rotation and a `filtersApplied` signal. Keep the byte payload outside JSON.
+- The extension already owns an attached `chrome.debugger` session and `Network` is an allowed CDP
+  domain. Record bounded metadata from `Network.responseReceived`; after `loadingFinished`, obtain
+  eligible image bodies with `Network.getResponseBody`, hash them locally and associate them with
+  Kiwi image hashes. Never read or export cookies.
+- Capture only image MIME types and enforce per-response and per-tab byte budgets. Do not collect
+  arbitrary API/HTML/script response bodies.
+- Write original bytes only through explicit `save_assets`; for a cropped, filtered, masked or
+  blended image also mark that a composited reference is required because the original bytes alone
+  cannot reproduce the visible result.
+- If the browser has already evicted a body, report `IMAGE_BODY_UNAVAILABLE` and offer recapture;
+  never replace it with a visually similar stock image.
+
+Exit criteria: the photo in the proven violation-card frame is saved from the active Figma session,
+and its manifest contains the exact fit/crop data needed to reproduce the visible crop.
+
+### 5D: complete typography and responsive properties
+
+- Preserve numeric `fontWeight`, PostScript name and variable-font axes when present; retain
+  `fontName.style` as the source name instead of treating a style-to-weight lookup as ground truth.
+- Reconstruct mixed text segments from style ids/override tables with per-run font, size, weight,
+  variation axes, fill, line height, letter spacing, case, decoration, hyperlink and list metadata.
+- Add truncation/max-lines/wrap, OpenType features and paragraph/list properties when the wire data
+  proves them. Keep exact character ranges.
+- Complete min/max sizing, GRID tracks and child placement, layout grids, overflow/fixed children,
+  aspect ratio, annotations, paint/effect variable bindings and non-text component properties.
+- Report missing fonts. Do not copy font files out of Figma network traffic; generated code must use
+  a project-owned/licensed font source or an explicit fallback.
+
+Exit criteria: plugin-reader parity tests cover a mixed-style text block, a variable font, a
+wrapping/grid layout and an instance with text/boolean/variant/instance-swap properties.
+
+### 5E: visual reference and closed-loop verification
+
+- Add an explicit `capture_reference` action using CDP `Page.captureScreenshot`. It captures the
+  visible Figma surface without REST quota or a Figma plugin. Because this is a viewport screenshot,
+  record viewport, device scale, current selected node and crop confidence; never label an inferred
+  crop as a native node export.
+- Prefer a user-provided/native Figma PNG export when available. It is the only reliable oracle for
+  complex blur, blend modes, font rasterization and colour-profile behavior; browser-only Kiwi
+  cannot promise byte-identical native rendering.
+- Provide a deterministic local subtree preview (SVG, optionally rasterized with `resvg`) as a
+  second diagnostic reference. It is useful for locating missing assets and transform mistakes, but
+  cannot validate its own renderer.
+- Add a comparison report for equal-sized PNGs: changed-pixel ratio, perceptual score, bounding box
+  of differences and a heatmap/diff file. Ignore no pixels by default; optional tolerances must be
+  explicit and recorded.
+- Update `figma-codegen` to require this loop for pixel-fidelity work: implement -> fixed-viewport
+  screenshot -> diff -> inspect largest regions -> adjust -> repeat. Exact structured values always
+  outrank measurements inferred from screenshots.
+
+Exit criteria: the violation-card test produces an asset pack, a fixed 1920x1080 implementation
+screenshot, a reference screenshot and a reproducible diff report. The report distinguishes known
+renderer/font antialiasing differences from structural, typography and missing-asset failures.
+
+### Accuracy contract
+
+- **Structured parity:** exact node hierarchy, dimensions, transforms, paints, layout and text values
+  for every supported property.
+- **Asset completeness:** every visible raster/vector asset is saved or explicitly reported missing.
+- **Visual convergence:** implementation and reference are compared at the same viewport and scale;
+  every remaining difference is visible in the report.
+- **No universal native-pixel guarantee:** Figma's private renderer, OS/browser font rasterization,
+  shaders, complex blend modes and unavailable fonts can still differ. The tool promises measured,
+  explainable convergence rather than claiming perfect equality without evidence.
 
 ## Phase 6: tokens, components and codegen integration
 

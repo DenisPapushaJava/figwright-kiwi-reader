@@ -4,8 +4,15 @@ import { McpServer, type CallToolResult } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 
+import {
+  collectDesignAssetInventory,
+  DESIGN_CONTEXT_SCHEMA_VERSION,
+  saveVectorAssetPack,
+} from './asset-pack.js';
 import { KiwiCaptureServer, type KiwiCaptureSession } from './capture-server.js';
 import { normalizeCapturedNode } from './normalize.js';
+import { comparePngFiles } from './png-diff.js';
+import { saveReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, type CapturedNode } from './scenegraph.js';
 
 const DEFAULT_MAX_NODES = 2_000;
@@ -13,7 +20,9 @@ const DEFAULT_MAX_DEPTH = 12;
 const MAX_RESPONSE_CHARS = 1_500_000;
 const MAX_SECTION_PLAN_SECTIONS = 200;
 const MAX_SECTION_NAME_CHARS = 500;
+const MAX_ASSET_INVENTORY_ENTRIES = 1_000;
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false } as const;
+const LOCAL_WRITE = { readOnlyHint: false, destructiveHint: false } as const;
 
 const capture = new KiwiCaptureServer({
   port: Number.parseInt(process.env.FIGWRIGHT_KIWI_PORT ?? '9224', 10),
@@ -151,6 +160,7 @@ const sectionPlan = (root: CapturedNode, reason: string) => {
     return summary;
   });
   return {
+    schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
     nodes: [{ id: root.id, ...boundedName(root.name), type: root.type }],
     sectionPlan: {
       reason,
@@ -160,6 +170,17 @@ const sectionPlan = (root: CapturedNode, reason: string) => {
       omittedSections: Math.max(0, root.children.length - sections.length),
     },
     note: 'Request each section nodeId with get_design_context at detail full.',
+  };
+};
+
+const designAssets = (root: CapturedNode, session: KiwiCaptureSession) => {
+  const inventory = collectDesignAssetInventory(root, session.blobs, session.networkAssets);
+  const entries = inventory.entries.slice(0, MAX_ASSET_INVENTORY_ENTRIES);
+  return {
+    summary: inventory.summary,
+    entries,
+    entriesTruncated: entries.length < inventory.entries.length,
+    omittedEntries: Math.max(0, inventory.entries.length - entries.length),
   };
 };
 
@@ -305,7 +326,9 @@ const createMcpServer = (): McpServer => {
     ({ nodeId, depth, detail }) => {
       const result = pickNode(nodeId, depth === undefined ? {} : { depth });
       const projected = projectNode(normalizeCapturedNode(result.captured), detail ?? 'full');
+      const assets = designAssets(result.captured, result.session);
       const output = {
+        schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
         nodes: [projected],
         capture: {
           provider: 'kiwi-browser',
@@ -319,8 +342,39 @@ const createMcpServer = (): McpServer => {
             cycles: result.stats.instanceCycles,
           },
         },
+        capabilities: {
+          structuredProperties: 'captured-when-present',
+          componentInstances:
+            result.stats.unresolvedInstances === 0 ? 'resolved' : 'partially-resolved',
+          vectorAssets:
+            assets.summary.vectors === 0
+              ? 'not-present'
+              : assets.summary.vectors === assets.summary.exportableVectors
+                ? 'exportable'
+                : 'partially-exportable',
+          rasterImages: !result.session.captureImages
+            ? 'disabled-by-user'
+            : assets.summary.images === 0
+              ? 'not-present'
+              : assets.summary.availableImages === assets.summary.images
+                ? 'exportable'
+                : 'partially-exportable',
+          mixedTextRuns: 'unsupported',
+          variables: 'unsupported',
+          visualReference: 'not-captured',
+        },
+        assets,
         caveats: [
-          'Variables, non-text component-property assignments, mixed text runs and binary vector/image assets are not resolved yet.',
+          'Variables, non-text component-property assignments and mixed text runs are not resolved yet.',
+          ...(assets.summary.images === 0
+            ? []
+            : !result.session.captureImages
+              ? [
+                  `${assets.summary.images} raster image reference(s) were found, but raster capture was disabled in the extension.`,
+                ]
+              : [
+                  `${assets.summary.images} raster image reference(s) were found; their binary bodies are not captured yet.`,
+                ]),
           ...(result.stats.unresolvedInstances === 0
             ? []
             : [
@@ -336,6 +390,98 @@ const createMcpServer = (): McpServer => {
       }
       return textResult(output);
     },
+  );
+
+  server.registerTool(
+    'save_assets',
+    {
+      description:
+        'Export browser-captured vector geometry into a content-addressed SVG asset pack and write its versioned manifest locally.',
+      inputSchema: z.object({
+        nodeId: z.string().optional(),
+        depth: z.number().int().min(0).max(32).optional(),
+        outDir: z.string().min(1),
+      }),
+      annotations: LOCAL_WRITE,
+    },
+    async ({ nodeId, depth, outDir }) => {
+      const result = pickNode(nodeId, {
+        depth: depth ?? DEFAULT_MAX_DEPTH,
+        maxNodes: DEFAULT_MAX_NODES,
+      });
+      const saved = await saveVectorAssetPack({
+        root: result.captured,
+        blobs: result.session.blobs,
+        networkAssets: result.session.networkAssets,
+        fileKey: result.session.fileKey,
+        outDir,
+      });
+      return textResult({
+        schemaVersion: saved.manifest.schemaVersion,
+        manifestPath: saved.manifestPath,
+        assets: Object.keys(saved.manifest.assets).length,
+        usages: saved.manifest.usages.length,
+        missing: saved.manifest.missing,
+      });
+    },
+  );
+
+  server.registerTool(
+    'capture_reference',
+    {
+      description:
+        'Capture the visible Figma browser viewport as a PNG reference and write explicit viewport metadata beside it. This is not a native node export.',
+      inputSchema: z.object({
+        outPath: z.string().min(1),
+        tabId: z.number().int().optional(),
+        fileKey: z.string().optional(),
+      }),
+      annotations: LOCAL_WRITE,
+    },
+    async ({ outPath, tabId, fileKey }) => {
+      const session = sessionByTarget({
+        ...(tabId === undefined ? {} : { tabId }),
+        ...(fileKey === undefined ? {} : { fileKey }),
+      });
+      const reference = await capture.requestReference(session.tabId);
+      const saved = await saveReferenceCapture({
+        capture: reference,
+        outPath,
+        fileKey: session.fileKey,
+        tabId: session.tabId,
+        selectedNodeId: session.selectedNodeId,
+      });
+      return textResult({
+        schemaVersion: 'figwright-kiwi-reference@1',
+        ...saved,
+        source: 'figma-browser-viewport',
+        cropConfidence: 'viewport-only',
+      });
+    },
+  );
+
+  server.registerTool(
+    'compare_screenshots',
+    {
+      description:
+        'Compare equal-sized reference and implementation PNGs, write a heatmap, and report the exact changed-pixel ratio and bounding box.',
+      inputSchema: z.object({
+        referencePath: z.string().min(1),
+        actualPath: z.string().min(1),
+        diffPath: z.string().min(1),
+        tolerance: z.number().int().min(0).max(255).optional(),
+      }),
+      annotations: LOCAL_WRITE,
+    },
+    async ({ referencePath, actualPath, diffPath, tolerance }) =>
+      textResult(
+        await comparePngFiles({
+          referencePath,
+          actualPath,
+          diffPath,
+          ...(tolerance === undefined ? {} : { tolerance }),
+        }),
+      ),
   );
 
   return server;

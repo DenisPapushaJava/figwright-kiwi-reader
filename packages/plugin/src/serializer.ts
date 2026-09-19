@@ -689,6 +689,12 @@ const enrichWithMixins = (node: SceneNode, base: SerializedNode): SerializedNode
     out.characters = text.characters;
     out.fontSize = typeof text.fontSize === 'number' ? text.fontSize : MIXED;
     out.fontName = isFontName(text.fontName) ? serializeFontName(text.fontName) : MIXED;
+    const explicitFontWeight = (text as unknown as { fontWeight?: unknown }).fontWeight;
+    if (typeof explicitFontWeight === 'number' && Number.isFinite(explicitFontWeight)) {
+      out.fontWeight = explicitFontWeight;
+    } else if (out.fontName !== MIXED && typeof out.fontName.variationSettings?.wght === 'number') {
+      out.fontWeight = out.fontName.variationSettings.wght;
+    }
     out.textAlignHorizontal = text.textAlignHorizontal;
     out.textAlignVertical = text.textAlignVertical;
     out.lineHeight = serializeLineHeight(text.lineHeight);

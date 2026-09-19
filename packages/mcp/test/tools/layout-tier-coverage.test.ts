@@ -52,6 +52,7 @@ const APPEARANCE: Record<string, string> = {
   strokeJoin: 'appearance',
   effects: 'appearance',
   fontSize: 'typography',
+  fontWeight: 'typography',
   fontName: 'typography',
   lineHeight: 'typography',
   letterSpacing: 'typography',

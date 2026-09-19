@@ -28,13 +28,171 @@ body {
 
 .side-panel {
   width: auto;
-  min-width: 300px;
+  min-width: 0;
   min-height: 100vh;
 }
 
 .side-panel .panel {
-  max-width: 460px;
-  margin: 0 auto;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 6px;
+}
+
+.side-panel .header {
+  gap: 8px;
+  margin: 3px 4px 8px;
+}
+
+.side-panel .header img {
+  width: 30px;
+  height: 30px;
+}
+
+.side-panel h1 {
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.side-panel .header p {
+  font-size: 10px;
+}
+
+.side-panel .status-card {
+  position: relative;
+  min-height: 58px;
+  padding: 10px 54px 10px 11px;
+}
+
+.side-panel .status-heading {
+  gap: 8px;
+}
+
+.side-panel .status-heading strong {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.side-panel .status-heading p {
+  min-height: 0;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.side-panel .status-dot {
+  display: none;
+}
+
+.side-panel .progress {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  border-radius: 50%;
+}
+
+.side-panel .progress span {
+  position: absolute;
+  inset: 4px;
+  width: auto;
+  height: auto;
+  border-radius: 50%;
+  background: white;
+  transform: none;
+}
+
+.side-panel .progress.active {
+  background: conic-gradient(from 0deg, #2f6fed, #7c4dff 46%, #e4e9f1 47%);
+  animation: spinner 1s linear infinite;
+}
+
+.side-panel .progress.active span,
+.side-panel .progress.ready span,
+.side-panel .progress.error span {
+  width: auto;
+  animation: none;
+}
+
+.side-panel .progress.ready {
+  background: #17a05d;
+}
+
+.side-panel .progress.error {
+  background: #d92d20;
+}
+
+@keyframes spinner {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.side-panel .error-card,
+.side-panel .file-card,
+.side-panel .stats,
+.side-panel .capture-options {
+  margin-top: 7px;
+}
+
+.side-panel .error-card,
+.side-panel .file-card,
+.side-panel .capture-options {
+  padding: 9px 10px;
+}
+
+.side-panel .file-card > strong {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.side-panel .node-row {
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.side-panel .stats div {
+  padding: 7px 10px;
+}
+
+.side-panel .stats span {
+  font-size: 15px;
+  line-height: 18px;
+}
+
+.side-panel .stats small,
+.side-panel .file-label,
+.side-panel .node-row span {
+  font-size: 10px;
+}
+
+.side-panel .capture-options label {
+  margin-top: 6px;
+}
+
+.side-panel .capture-options b {
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.side-panel .capture-options small {
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.side-panel .hint {
+  display: none;
+}
+
+.side-panel .actions {
+  margin-top: 8px;
+}
+
+.side-panel button {
+  min-height: 34px;
+  font-size: 12px;
 }
 
 .header {
@@ -98,7 +256,8 @@ h1 {
 .status-card,
 .file-card,
 .stats,
-.error-card {
+.error-card,
+.capture-options {
   border: 1px solid #e3e8ef;
   border-radius: 14px;
   background: rgb(255 255 255 / 92%);
@@ -246,6 +405,50 @@ h1 {
 .stats small {
   color: #667085;
   font-size: 11px;
+}
+
+.capture-options {
+  margin-top: 10px;
+  padding: 12px 14px;
+}
+
+.capture-options > strong {
+  display: block;
+  color: #475467;
+  font-size: 11px;
+}
+
+.capture-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 9px;
+  cursor: pointer;
+}
+
+.capture-options input {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  margin: 1px 0 0;
+  accent-color: #2f6fed;
+}
+
+.capture-options b,
+.capture-options small {
+  display: block;
+}
+
+.capture-options b {
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.capture-options small {
+  margin-top: 2px;
+  color: #667085;
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .file-card > strong {

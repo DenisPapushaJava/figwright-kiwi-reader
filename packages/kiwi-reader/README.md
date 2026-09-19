@@ -73,6 +73,17 @@ canvas. The action badge keeps the compact state: `…` while connecting, `SYNC`
 `✓` when the graph has settled, `WAIT` while reconnecting, and `ERR` on an actionable failure.
 Reopen either surface to see the current counters, recapture the file, or detach.
 
+Raster image capture is opt-in and disabled by default. Enable **Захватывать растровые
+изображения** before connecting or recapturing when the selected design needs original photo/image
+bytes. The option is persisted in `chrome.storage.local`; only eligible `image/*` response bodies
+observed during the following reload are forwarded.
+
+After changing files in the unpacked extension directory, press **Reload** on the extension card at
+`chrome://extensions` and reopen the popup or side panel. Chrome can otherwise keep the previous
+service worker alive while loading the new popup files. The popup detects that UI/worker mismatch,
+disables the unsupported option, and reports `EXTENSION_RELOAD_REQUIRED` instead of a generic closed
+message port.
+
 Failures include a stable diagnostic code such as `LOCAL_MCP_OFFLINE`, `DEBUGGER_ATTACH_FAILED`,
 `FIGMA_STREAM_TIMEOUT`, or `KIWI_DECODE_FAILED`. The popup can copy a compact diagnostic object with
 the code, capture phase, file/node identifiers and counters; it deliberately excludes cookies,

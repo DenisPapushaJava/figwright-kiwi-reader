@@ -10,6 +10,8 @@ const elements = {
   nodeId: document.querySelector('#node-id'),
   nodeCount: document.querySelector('#node-count'),
   frameCount: document.querySelector('#frame-count'),
+  captureImages: document.querySelector('#capture-images'),
+  captureImagesHelp: document.querySelector('#capture-images-help'),
   pin: document.querySelector('#pin-action'),
   primary: document.querySelector('#primary-action'),
   disconnect: document.querySelector('#disconnect-action'),
@@ -30,6 +32,9 @@ let tabId = null;
 let currentState = null;
 let supportedTab = false;
 const isSidePanel = document.body.classList.contains('side-panel');
+const captureImagesHelp = 'Включите для фото; макетные заглушки можно пропустить';
+const reloadExtensionHelp =
+  'Обновите расширение на chrome://extensions, затем откройте панель снова';
 
 const formatNumber = value => new Intl.NumberFormat('ru-RU').format(value ?? 0);
 
@@ -47,6 +52,7 @@ const diagnostics = state =>
       nodes: state?.nodes ?? 0,
       decodedFrames: state?.decodedFrames ?? 0,
       ignoredFrames: state?.ignoredFrames ?? 0,
+      captureImages: state?.captureImages === true,
       extensionVersion: chrome.runtime.getManifest().version,
     },
     null,
@@ -70,6 +76,14 @@ const copyText = async text => {
   }
 };
 
+const requestError = message => {
+  const staleContext =
+    /message port closed|receiving end does not exist|extension context invalidated/i.test(message);
+  const error = new Error(staleContext ? reloadExtensionHelp : message);
+  if (staleContext) error.code = 'EXTENSION_RELOAD_REQUIRED';
+  return error;
+};
+
 const render = state => {
   currentState = state;
   const phase = state?.phase ?? 'idle';
@@ -91,6 +105,11 @@ const render = state => {
   elements.nodeId.textContent = state?.selectedNodeId ?? '—';
   elements.nodeCount.textContent = formatNumber(state?.nodes);
   elements.frameCount.textContent = formatNumber(state?.decodedFrames);
+  elements.captureImages.checked = state?.captureImages === true;
+  const captureOptionsSupported = state?.captureOptionsSupported === true;
+  elements.captureImagesHelp.textContent = captureOptionsSupported
+    ? captureImagesHelp
+    : reloadExtensionHelp;
 
   const busy = ['connecting', 'reloading'].includes(phase);
   if (elements.pin) elements.pin.disabled = !supportedTab;
@@ -98,13 +117,14 @@ const render = state => {
   elements.primary.textContent = state?.attached ? 'Считать заново' : 'Подключить макет';
   elements.disconnect.hidden = !state?.attached;
   elements.disconnect.disabled = busy;
+  elements.captureImages.disabled = !supportedTab || busy || !captureOptionsSupported;
 };
 
-const request = type =>
+const request = (type, payload = {}) =>
   new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type, tabId }, response => {
+    chrome.runtime.sendMessage({ type, tabId, ...payload }, response => {
       if (chrome.runtime.lastError) {
-        reject(new Error(chrome.runtime.lastError.message));
+        reject(requestError(chrome.runtime.lastError.message));
         return;
       }
       if (!response?.ok) {
@@ -157,6 +177,33 @@ elements.primary.addEventListener('click', () => {
 
 elements.disconnect.addEventListener('click', () => {
   void runAction('disconnect');
+});
+
+elements.captureImages.addEventListener('change', async () => {
+  if (currentState?.captureOptionsSupported !== true) {
+    render({
+      ...currentState,
+      phase: 'error',
+      errorCode: 'EXTENSION_RELOAD_REQUIRED',
+      errorMessage: reloadExtensionHelp,
+    });
+    return;
+  }
+  elements.captureImages.disabled = true;
+  try {
+    render(
+      await request('set-capture-options', {
+        captureImages: elements.captureImages.checked,
+      }),
+    );
+  } catch (error) {
+    render({
+      ...currentState,
+      phase: 'error',
+      errorCode: error.code ?? 'CAPTURE_OPTIONS_FAILED',
+      errorMessage: error.message,
+    });
+  }
 });
 
 elements.pin?.addEventListener('click', async () => {

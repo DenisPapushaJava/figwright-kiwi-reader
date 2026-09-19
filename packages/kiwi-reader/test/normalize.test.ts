@@ -41,6 +41,12 @@ describe('normalizeCapturedNode', () => {
         stackCounterAlignItems: 'CENTER',
         fontSize: 18,
         fontName: { family: 'Inter', style: 'Semi Bold', postscript: 'Inter-SemiBold' },
+        fontWeight: 600,
+        minWidth: 120,
+        maxWidth: 320,
+        overflowDirection: 'VERTICAL',
+        numberOfFixedChildren: 1,
+        targetAspectRatio: { x: 10, y: 3 },
         textData: {
           characters: 'Continue',
           fontSize: 16,
@@ -48,6 +54,9 @@ describe('normalizeCapturedNode', () => {
           lineHeight: { value: 24, units: 'PIXELS' },
           letterSpacing: { value: 0, units: 'PIXELS' },
           textAlignHorizontal: 'CENTER',
+          textTruncation: 'ENDING',
+          maxLines: 2,
+          textWrapStyle: 'BALANCE',
           derivedTextData: { glyphs: [1, 2, 3] },
           editInfo: { userId: 'private' },
         },
@@ -78,10 +87,23 @@ describe('normalizeCapturedNode', () => {
       },
       characters: 'Continue',
       fontSize: 18,
-      fontName: { family: 'Inter', style: 'Semi Bold' },
+      fontName: {
+        family: 'Inter',
+        style: 'Semi Bold',
+        postScriptName: 'Inter-SemiBold',
+      },
+      fontWeight: 600,
+      minWidth: 120,
+      maxWidth: 320,
+      overflowDirection: 'VERTICAL',
+      numberOfFixedChildren: 1,
+      targetAspectRatio: { x: 10, y: 3 },
+      textTruncation: 'ENDING',
+      maxLines: 2,
+      textWrapStyle: 'BALANCE',
       lineHeight: { value: 24, unit: 'PIXELS' },
     });
-    expect(JSON.stringify(node)).not.toMatch(/derivedTextData|editInfo|postscript|userId/);
+    expect(JSON.stringify(node)).not.toMatch(/derivedTextData|editInfo|userId/);
   });
 
   it('omits no-op defaults and normalizes children recursively', () => {

@@ -103,6 +103,12 @@ const normalizePaint = (value: unknown): SerializedPaint | null => {
 
   if (type === 'IMAGE' || type === 'VIDEO') {
     const scaleMode = nonEmptyString(source.scaleMode);
+    const filters = record(source.filters ?? source.imageFilters);
+    const filtersApplied =
+      filters !== null &&
+      Object.values(filters).some(
+        item => typeof item === 'number' && Number.isFinite(item) && item !== 0,
+      );
     return {
       type,
       ...base,
@@ -112,6 +118,7 @@ const normalizePaint = (value: unknown): SerializedPaint | null => {
       scaleMode === 'TILE'
         ? { scaleMode }
         : {}),
+      ...(filtersApplied ? { filtersApplied: true } : {}),
     };
   }
 
@@ -234,15 +241,40 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
   const font = record(raw.fontName ?? text.fontName);
   const family = nonEmptyString(font?.family);
   const style = nonEmptyString(font?.style);
+  const postScriptName = nonEmptyString(
+    font?.postScriptName ?? font?.postscriptName ?? font?.postscript,
+  );
+  const variationSettings = record(font?.variationSettings);
+  const variations =
+    variationSettings === null
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(variationSettings).filter(
+            (entry): entry is [string, number] => finiteNumber(entry[1]) !== undefined,
+          ),
+        );
+  const fontWeight = finiteNumber(raw.fontWeight ?? text.fontWeight ?? variations?.wght);
   if (characters !== undefined) output.characters = characters;
   if (fontSize !== undefined) output.fontSize = fontSize;
-  if (family !== undefined && style !== undefined) output.fontName = { family, style };
+  if (family !== undefined && style !== undefined) {
+    output.fontName = {
+      family,
+      style,
+      ...(postScriptName === undefined ? {} : { postScriptName }),
+      ...(variations === undefined || Object.keys(variations).length === 0
+        ? {}
+        : { variationSettings: variations }),
+    };
+  }
+  if (fontWeight !== undefined) output.fontWeight = fontWeight;
   for (const [sourceKey, targetKey] of [
     ['textAlignHorizontal', 'textAlignHorizontal'],
     ['textAlignVertical', 'textAlignVertical'],
     ['textCase', 'textCase'],
     ['textDecoration', 'textDecoration'],
     ['textAutoResize', 'textAutoResize'],
+    ['textTruncation', 'textTruncation'],
+    ['textWrapStyle', 'textWrapStyle'],
   ] as const) {
     const value = nonEmptyString(text[sourceKey] ?? raw[sourceKey]);
     if (value !== undefined) output[targetKey] = value;
@@ -253,8 +285,10 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
   if (letterSpacing !== undefined) output.letterSpacing = letterSpacing;
   const paragraphSpacing = finiteNumber(text.paragraphSpacing ?? raw.paragraphSpacing);
   const paragraphIndent = finiteNumber(text.paragraphIndent ?? raw.paragraphIndent);
+  const maxLines = finiteNumber(text.maxLines ?? raw.maxLines);
   if (paragraphSpacing !== undefined) output.paragraphSpacing = paragraphSpacing;
   if (paragraphIndent !== undefined) output.paragraphIndent = paragraphIndent;
+  if (maxLines !== undefined) output.maxLines = maxLines;
 };
 
 const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
@@ -285,6 +319,18 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
   const blendMode = nonEmptyString(raw.blendMode);
   if (blendMode !== undefined && blendMode !== 'PASS_THROUGH' && blendMode !== 'NORMAL') {
     output.blendMode = blendMode;
+  }
+  const arc = record(raw.arcData);
+  const startingAngle = finiteNumber(arc?.startingAngle);
+  const endingAngle = finiteNumber(arc?.endingAngle);
+  const innerRadius = finiteNumber(arc?.innerRadius);
+  if (
+    startingAngle !== undefined &&
+    endingAngle !== undefined &&
+    innerRadius !== undefined &&
+    (startingAngle !== 0 || endingAngle !== Math.PI * 2 || innerRadius !== 0)
+  ) {
+    output.arcData = { startingAngle, endingAngle, innerRadius };
   }
 
   if (raw.rectangleCornerRadiiIndependent === true) {
@@ -352,6 +398,10 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
   if (layoutAlign !== undefined) output.layoutAlign = layoutAlign;
   if (layoutPositioning !== undefined) output.layoutPositioning = layoutPositioning;
   if (layoutGrow !== undefined && layoutGrow !== 0) output.layoutGrow = layoutGrow;
+  for (const key of ['minWidth', 'maxWidth', 'minHeight', 'maxHeight'] as const) {
+    const value = finiteNumber(raw[key]);
+    if (value !== undefined) output[key] = value;
+  }
 
   const constraints = record(raw.constraints);
   const horizontal = nonEmptyString(constraints?.horizontal ?? raw.horizontalConstraint);
@@ -360,6 +410,20 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
     output.constraints = { horizontal, vertical };
   }
   if (raw.clipsContent === true) output.clipsContent = true;
+  const overflowDirection = nonEmptyString(raw.overflowDirection);
+  if (overflowDirection !== undefined && overflowDirection !== 'NONE') {
+    output.overflowDirection = overflowDirection;
+  }
+  const numberOfFixedChildren = finiteNumber(raw.numberOfFixedChildren);
+  if (numberOfFixedChildren !== undefined && numberOfFixedChildren > 0) {
+    output.numberOfFixedChildren = numberOfFixedChildren;
+  }
+  const aspectRatio = record(raw.targetAspectRatio);
+  const aspectX = finiteNumber(aspectRatio?.x);
+  const aspectY = finiteNumber(aspectRatio?.y);
+  if (aspectX !== undefined && aspectY !== undefined && aspectX > 0 && aspectY > 0) {
+    output.targetAspectRatio = { x: aspectX, y: aspectY };
+  }
   if (raw.isMask === true) output.isMask = true;
   const maskType = nonEmptyString(raw.maskType);
   if (raw.isMask === true && maskType !== undefined) output.maskType = maskType;

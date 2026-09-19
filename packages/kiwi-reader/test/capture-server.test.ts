@@ -278,6 +278,29 @@ describe('KiwiCaptureServer', () => {
     expect(() => session.ingest(invalidPayload)).toThrow(/./);
   });
 
+  it('retains only image network bodies in the matching tab session and clears them on reset', () => {
+    const session = new KiwiCaptureSession(
+      45,
+      {
+        type: 'hello',
+        tabId: 45,
+        url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+      },
+      { fileKey: 'file', selectedNodeId: '6:140' },
+    );
+    expect(
+      session.ingestAsset({
+        url: 'https://www.figma.com/image/test',
+        mimeType: 'image/png',
+        payload: Buffer.from([1, 2, 3]).toString('base64'),
+        base64Encoded: true,
+      }),
+    ).toBe(true);
+    expect(session.status.networkAssets).toMatchObject({ received: 1, retained: 1, bytes: 3 });
+    session.reset();
+    expect(session.status.networkAssets).toMatchObject({ received: 0, retained: 0, bytes: 0 });
+  });
+
   it('coalesces progress while retaining the latest counters', async () => {
     const { messagePayload, schemaPayload } = fixtureFrames();
     const server = new KiwiCaptureServer({ port: 0, statusThrottleMs: 100 });

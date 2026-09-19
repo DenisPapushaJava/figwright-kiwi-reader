@@ -165,6 +165,7 @@ const richText = base({
   type: 'TEXT',
   characters: 'Link text',
   fontSize: Symbol('mixed'),
+  fontWeight: 700,
   fontName: { family: 'Inter', style: 'Bold' },
   textAlignHorizontal: 'CENTER',
   textAlignVertical: 'BOTTOM',

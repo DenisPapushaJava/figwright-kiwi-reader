@@ -1,8 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage } from 'node:http';
 
 import { WebSocketServer, type WebSocket } from 'ws';
 
+import { CapturedBlobStore, type CapturedBlobStats } from './blob-store.js';
+import { CapturedNetworkAssetStore, type CapturedNetworkAssetStats } from './network-assets.js';
+import { decodeReferencePng, type BrowserReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, SceneGraphLimitError, SceneGraphStore } from './scenegraph.js';
 import { KiwiWireDecoder } from './wire.js';
 
@@ -15,6 +19,7 @@ interface ExtensionHello {
   url: string;
   title?: string;
   reset?: boolean;
+  captureImages?: boolean;
 }
 
 interface ExtensionFrame {
@@ -28,7 +33,38 @@ interface ExtensionDetach {
   tabId: number;
 }
 
-type ExtensionMessage = ExtensionHello | ExtensionFrame | ExtensionDetach | { type: 'ping' };
+interface ExtensionAsset {
+  type: 'asset';
+  tabId: number;
+  url: string;
+  mimeType: string;
+  payload: string;
+  base64Encoded: boolean;
+}
+
+interface ExtensionReference {
+  type: 'capture-reference';
+  tabId: number;
+  requestId: string;
+  payload: string;
+  viewport: BrowserReferenceCapture['viewport'];
+}
+
+interface ExtensionReferenceError {
+  type: 'capture-reference-error';
+  tabId: number;
+  requestId: string;
+  message: string;
+}
+
+type ExtensionMessage =
+  | ExtensionHello
+  | ExtensionFrame
+  | ExtensionAsset
+  | ExtensionReference
+  | ExtensionReferenceError
+  | ExtensionDetach
+  | { type: 'ping' };
 
 export interface FigmaLocation {
   fileKey: string;
@@ -46,6 +82,9 @@ export interface CaptureSessionStatus {
   nodes: number;
   decodedFrames: number;
   ignoredFrames: number;
+  blobs: CapturedBlobStats;
+  networkAssets: CapturedNetworkAssetStats;
+  captureImages: boolean;
 }
 
 export interface CaptureStatus {
@@ -107,6 +146,9 @@ const parseMessage = (data: Buffer): ExtensionMessage | null => {
         url: message.url,
         ...(typeof message.title === 'string' ? { title: message.title } : {}),
         ...(message.reset === true ? { reset: true } : {}),
+        ...(typeof message.captureImages === 'boolean'
+          ? { captureImages: message.captureImages }
+          : {}),
       };
     }
     if (
@@ -115,6 +157,59 @@ const parseMessage = (data: Buffer): ExtensionMessage | null => {
       typeof message.payload === 'string'
     ) {
       return { type: 'frame', tabId: message.tabId as number, payload: message.payload };
+    }
+    if (
+      message.type === 'asset' &&
+      Number.isInteger(message.tabId) &&
+      typeof message.url === 'string' &&
+      typeof message.mimeType === 'string' &&
+      typeof message.payload === 'string' &&
+      typeof message.base64Encoded === 'boolean'
+    ) {
+      return {
+        type: 'asset',
+        tabId: message.tabId as number,
+        url: message.url,
+        mimeType: message.mimeType,
+        payload: message.payload,
+        base64Encoded: message.base64Encoded,
+      };
+    }
+    if (
+      message.type === 'capture-reference' &&
+      Number.isInteger(message.tabId) &&
+      typeof message.requestId === 'string' &&
+      typeof message.payload === 'string'
+    ) {
+      const viewport = message.viewport as Record<string, unknown> | undefined;
+      if (
+        viewport === undefined ||
+        !['width', 'height', 'pageX', 'pageY'].every(
+          key => typeof viewport[key] === 'number' && Number.isFinite(viewport[key]),
+        )
+      ) {
+        return null;
+      }
+      return {
+        type: 'capture-reference',
+        tabId: message.tabId as number,
+        requestId: message.requestId,
+        payload: message.payload,
+        viewport: viewport as unknown as BrowserReferenceCapture['viewport'],
+      };
+    }
+    if (
+      message.type === 'capture-reference-error' &&
+      Number.isInteger(message.tabId) &&
+      typeof message.requestId === 'string' &&
+      typeof message.message === 'string'
+    ) {
+      return {
+        type: 'capture-reference-error',
+        tabId: message.tabId as number,
+        requestId: message.requestId,
+        message: message.message,
+      };
     }
     return null;
   } catch {
@@ -125,12 +220,15 @@ const parseMessage = (data: Buffer): ExtensionMessage | null => {
 export class KiwiCaptureSession {
   readonly graph = new SceneGraphStore();
   readonly decoder = new KiwiWireDecoder();
+  readonly blobs = new CapturedBlobStore();
+  readonly networkAssets = new CapturedNetworkAssetStore();
 
   connected = true;
   fileKey: string;
   selectedNodeId: string | null;
   url: string;
   title: string | null;
+  captureImages: boolean;
   decodedFrames = 0;
   ignoredFrames = 0;
   consecutiveDecodeFailures = 0;
@@ -148,6 +246,7 @@ export class KiwiCaptureSession {
     this.selectedNodeId = location.selectedNodeId;
     this.url = hello.url;
     this.title = hello.title ?? null;
+    this.captureImages = hello.captureImages === true;
   }
 
   get status(): CaptureSessionStatus {
@@ -162,6 +261,9 @@ export class KiwiCaptureSession {
       nodes: this.graph.size,
       decodedFrames: this.decodedFrames,
       ignoredFrames: this.ignoredFrames,
+      blobs: this.blobs.stats,
+      networkAssets: this.networkAssets.stats,
+      captureImages: this.captureImages,
     };
   }
 
@@ -172,6 +274,7 @@ export class KiwiCaptureSession {
     this.selectedNodeId = location.selectedNodeId;
     this.url = hello.url;
     this.title = hello.title ?? null;
+    this.captureImages = hello.captureImages === true;
     this.lastActivityAt = Date.now();
   }
 
@@ -185,6 +288,7 @@ export class KiwiCaptureSession {
       this.captureErrorActive = false;
       this.decodedFrames++;
       try {
+        this.blobs.captureMessage(decoded.message);
         return this.graph.apply(decoded.message);
       } catch (error) {
         if (error instanceof SceneGraphLimitError) {
@@ -212,8 +316,15 @@ export class KiwiCaptureSession {
     return 0;
   }
 
+  ingestAsset(asset: Omit<ExtensionAsset, 'type' | 'tabId'>): boolean {
+    this.lastActivityAt = Date.now();
+    return this.networkAssets.ingest(asset) !== null;
+  }
+
   reset(): void {
     this.graph.clear();
+    this.blobs.clear();
+    this.networkAssets.clear();
     this.decoder.reset();
     this.decodedFrames = 0;
     this.ignoredFrames = 0;
@@ -232,6 +343,15 @@ export class KiwiCaptureServer extends EventEmitter {
   private readonly sessionMap = new Map<number, KiwiCaptureSession>();
   private readonly statusTimers = new Map<number, ReturnType<typeof setTimeout>>();
   private readonly lastStatusAt = new Map<number, number>();
+  private readonly referenceRequests = new Map<
+    string,
+    {
+      tabId: number;
+      resolve: (value: BrowserReferenceCapture) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private server: WebSocketServer | null = null;
   private socket: WebSocket | null = null;
 
@@ -289,6 +409,7 @@ export class KiwiCaptureServer extends EventEmitter {
     this.socket?.close(1000, 'Server stopped');
     this.socket = null;
     this.clearStatusTimers();
+    this.rejectReferenceRequests(new Error('Capture server stopped'));
     for (const session of this.sessionMap.values()) session.connected = false;
     this.emit('stopped');
     if (server === null) return;
@@ -341,6 +462,25 @@ export class KiwiCaptureServer extends EventEmitter {
     });
   }
 
+  requestReference(tabId: number, timeoutMs = 15_000): Promise<BrowserReferenceCapture> {
+    const socket = this.socket;
+    if (socket === null || socket.readyState !== socket.OPEN) {
+      return Promise.reject(new Error('Browser extension is not connected'));
+    }
+    if (!this.sessionMap.has(tabId)) {
+      return Promise.reject(new Error(`No captured Figma tab ${tabId}`));
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.referenceRequests.delete(requestId);
+        reject(new Error('Timed out waiting for the Figma viewport screenshot'));
+      }, timeoutMs);
+      this.referenceRequests.set(requestId, { tabId, resolve, reject, timer });
+      socket.send(JSON.stringify({ type: 'capture-reference-request', tabId, requestId }));
+    });
+  }
+
   private bind(socket: WebSocket): void {
     this.socket?.close(4000, 'Replaced by a newer browser connection');
     this.socket = socket;
@@ -371,8 +511,17 @@ export class KiwiCaptureServer extends EventEmitter {
         return;
       }
 
+      if (message.type === 'capture-reference' || message.type === 'capture-reference-error') {
+        this.finishReferenceRequest(message);
+        return;
+      }
+
       const session = this.sessionMap.get(message.tabId);
       if (session === undefined) return;
+      if (message.type === 'asset') {
+        if (session.ingestAsset(message)) this.queueSessionStatus(socket, session);
+        return;
+      }
       try {
         const applied = session.ingest(message.payload);
         if (applied > 0) this.emit('update', session.status);
@@ -396,6 +545,7 @@ export class KiwiCaptureServer extends EventEmitter {
       if (this.socket !== socket) return;
       this.socket = null;
       this.clearStatusTimers();
+      this.rejectReferenceRequests(new Error('Browser extension disconnected'));
       for (const session of this.sessionMap.values()) session.connected = false;
       this.emit('status', this.status);
     });
@@ -408,6 +558,12 @@ export class KiwiCaptureServer extends EventEmitter {
     this.sessionMap.delete(tabId);
     this.cancelSessionStatus(tabId);
     this.lastStatusAt.delete(tabId);
+    for (const [requestId, request] of this.referenceRequests) {
+      if (request.tabId !== tabId) continue;
+      clearTimeout(request.timer);
+      this.referenceRequests.delete(requestId);
+      request.reject(new Error(`Figma tab ${tabId} detached during reference capture`));
+    }
     this.emit('status', this.status);
   }
 
@@ -453,5 +609,29 @@ export class KiwiCaptureServer extends EventEmitter {
     const timer = this.statusTimers.get(tabId);
     if (timer !== undefined) clearTimeout(timer);
     this.statusTimers.delete(tabId);
+  }
+
+  private finishReferenceRequest(message: ExtensionReference | ExtensionReferenceError): void {
+    const pending = this.referenceRequests.get(message.requestId);
+    if (pending === undefined || pending.tabId !== message.tabId) return;
+    clearTimeout(pending.timer);
+    this.referenceRequests.delete(message.requestId);
+    if (message.type === 'capture-reference-error') {
+      pending.reject(new Error(message.message));
+      return;
+    }
+    try {
+      pending.resolve({ png: decodeReferencePng(message.payload), viewport: message.viewport });
+    } catch (error) {
+      pending.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private rejectReferenceRequests(error: Error): void {
+    for (const request of this.referenceRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+    this.referenceRequests.clear();
   }
 }
