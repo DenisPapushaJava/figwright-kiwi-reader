@@ -83,32 +83,28 @@ corepack pnpm package:kiwi
 
 Kiwi Reader выпускается независимо от основного Figwright:
 
-1. Изменить код и добавить проверяющие тесты.
-2. Обновить `version` в `packages/kiwi-reader/extension/manifest.json` и в шаблоне плагина
-   `packages/kiwi-reader/release/codex-plugin/.codex-plugin/plugin.json`.
-3. Выполнить все обязательные проверки:
+1. Откройте **Actions → Prepare Kiwi Reader Release → Run workflow**.
+2. Выберите тип повышения версии: `patch`, `minor` или `major`.
+3. Workflow синхронно обновит версии расширения и Codex-плагина, создаст ветку
+   `release/kiwi-vX.Y.Z`, откроет PR с русским описанием и запустит обязательные проверки.
+4. После успешного CI выполните **Squash and merge**. Изменение версии в `main` автоматически
+   запустит `Kiwi Reader Release`.
 
-   ```powershell
-   corepack pnpm typecheck
-   corepack pnpm lint
-   corepack pnpm format:check
-   corepack pnpm knip
-   corepack pnpm build
-   corepack pnpm test
-   corepack pnpm package:kiwi
-   ```
+Release workflow повторно выполняет все проверки, создаёт тег `kiwi-vX.Y.Z`, ZIP и SHA-256
+checksum, после чего публикует GitHub Release. Обычный merge без изменения двух файлов версии релиз
+не запускает.
 
-4. Проверить собранную папку на чистом Windows-профиле и выполнить реальное чтение простого и
-   большого макета.
-5. Создать и отправить тег, совпадающий с версией manifest:
+Перед merge релизного PR при необходимости соберите комплект локально и проверьте его на чистом
+Windows-профиле:
 
-   ```powershell
-   git tag kiwi-v0.3.1
-   git push origin kiwi-v0.3.1
-   ```
+```powershell
+corepack pnpm build
+corepack pnpm test
+corepack pnpm package:kiwi
+```
 
-Workflow `Kiwi Reader Release` повторно выполняет проверки, создаёт ZIP и SHA-256 checksum, после
-чего публикует GitHub Release. Теги `kiwi-v*` отделены от upstream-тегов `v*`, чтобы случайно не
+Ручной тег `kiwi-vX.Y.Z`, совпадающий с версиями в обоих manifest, остаётся резервным способом
+перезапуска release workflow. Теги `kiwi-v*` отделены от upstream-тегов `v*`, чтобы случайно не
 запустить публикацию оригинального `@figwright/mcp` в npm.
 
 ## Безопасность и границы

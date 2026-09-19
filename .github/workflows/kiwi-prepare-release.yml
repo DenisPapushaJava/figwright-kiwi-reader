@@ -1,0 +1,125 @@
+name: Prepare Kiwi Reader Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version increment
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+permissions: {}
+
+concurrency:
+  group: kiwi-prepare-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # dispatch required checks for the generated branch
+      contents: write # push the release branch
+      pull-requests: write # open the version PR
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Update both Kiwi Reader versions
+        id: version
+        env:
+          BUMP: ${{ inputs.bump }}
+        shell: bash
+        run: |
+          version=$(node scripts/prepare-kiwi-release.mjs "$BUMP")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "branch=release/kiwi-v$version" >> "$GITHUB_OUTPUT"
+          echo "title=chore(repo): prepare Kiwi Reader v$version" >> "$GITHUB_OUTPUT"
+
+      - name: Refuse an existing release
+        env:
+          BRANCH: ${{ steps.version.outputs.branch }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            echo "Remote branch $BRANCH already exists" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/kiwi-v$VERSION" >/dev/null 2>&1; then
+            echo "Tag kiwi-v$VERSION already exists" >&2
+            exit 1
+          fi
+
+      - name: Push the release branch
+        env:
+          BRANCH: ${{ steps.version.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.version.outputs.title }}
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git add \
+            packages/kiwi-reader/extension/manifest.json \
+            packages/kiwi-reader/release/codex-plugin/.codex-plugin/plugin.json
+          git commit -m "$TITLE"
+          gh auth setup-git
+          git push --set-upstream origin "$BRANCH"
+
+      - name: Open the version pull request
+        id: pull-request
+        env:
+          BRANCH: ${{ steps.version.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.version.outputs.title }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          body="$RUNNER_TEMP/kiwi-release-pr.md"
+          cat > "$body" <<EOF
+          ## Проблема
+
+          Для выпуска Kiwi Reader версии $VERSION обе версии должны измениться синхронно.
+
+          ## Изменения
+
+          - Обновлена версия Chrome-расширения до \`$VERSION\`.
+          - Обновлена версия локального Codex-плагина до \`$VERSION\`.
+          - После squash merge workflow автоматически проверит проект и опубликует GitHub Release.
+
+          ## Проверка
+
+          Обязательные проверки запускаются автоматически для этой ветки.
+          EOF
+          url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$body")
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "### Kiwi Reader $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
+
+      # Events created with GITHUB_TOKEN do not recursively start ordinary PR workflows.
+      # workflow_dispatch is the supported exception, so dispatch the same required checks
+      # against the generated commit explicitly.
+      - name: Start required checks
+        env:
+          BRANCH: ${{ steps.version.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TITLE: ${{ steps.version.outputs.title }}
+        shell: bash
+        run: |
+          gh workflow run ci.yml --ref "$BRANCH"
+          gh workflow run semantic-pr.yml --ref "$BRANCH" -f title="$TITLE"

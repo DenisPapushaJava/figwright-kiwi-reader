@@ -3,6 +3,10 @@ name: Kiwi Reader Release
 on:
   push:
     tags: ['kiwi-v*']
+    branches: [main]
+    paths:
+      - packages/kiwi-reader/extension/manifest.json
+      - packages/kiwi-reader/release/codex-plugin/.codex-plugin/plugin.json
 
 permissions: {}
 
@@ -35,34 +39,45 @@ jobs:
       - run: pnpm build
       - run: pnpm test
 
-      - name: Verify tag version
+      - name: Resolve release version
+        id: release
         shell: bash
         run: |
-          manifest_version=$(node -p "require('./packages/kiwi-reader/extension/manifest.json').version")
-          tag_version="${GITHUB_REF_NAME#kiwi-v}"
-          test "$manifest_version" = "$tag_version" || {
-            echo "Tag $tag_version does not match extension $manifest_version" >&2
+          extension_version=$(node -p "require('./packages/kiwi-reader/extension/manifest.json').version")
+          plugin_version=$(node -p "require('./packages/kiwi-reader/release/codex-plugin/.codex-plugin/plugin.json').version")
+          test "$extension_version" = "$plugin_version" || {
+            echo "Extension $extension_version does not match plugin $plugin_version" >&2
             exit 1
           }
+          tag="kiwi-v$extension_version"
+          if [[ "$GITHUB_REF_TYPE" = "tag" && "$GITHUB_REF_NAME" != "$tag" ]]; then
+            echo "Tag $GITHUB_REF_NAME does not match Kiwi Reader $extension_version" >&2
+            exit 1
+          fi
+          echo "version=$extension_version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - run: pnpm package:kiwi
 
       - name: Package release
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
         shell: bash
         run: |
-          asset_version="${GITHUB_REF_NAME#kiwi-}"
           cd artifacts
-          zip -r "figwright-kiwi-reader-${asset_version}.zip" figwright-kiwi-reader
-          sha256sum "figwright-kiwi-reader-${asset_version}.zip" > "figwright-kiwi-reader-${asset_version}.sha256"
+          zip -r "figwright-kiwi-reader-v${VERSION}.zip" figwright-kiwi-reader
+          sha256sum "figwright-kiwi-reader-v${VERSION}.zip" > "figwright-kiwi-reader-v${VERSION}.sha256"
 
       - name: Publish GitHub Release
-        shell: bash
-        run: |
-          asset_version="${GITHUB_REF_NAME#kiwi-}"
-          gh release create "$GITHUB_REF_NAME" \
-            "artifacts/figwright-kiwi-reader-${asset_version}.zip" \
-            "artifacts/figwright-kiwi-reader-${asset_version}.sha256" \
-            --generate-notes \
-            --title "Figwright Kiwi Reader ${GITHUB_REF_NAME#kiwi-v}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        shell: bash
+        run: |
+          gh release create "$TAG" \
+            "artifacts/figwright-kiwi-reader-v${VERSION}.zip" \
+            "artifacts/figwright-kiwi-reader-v${VERSION}.sha256" \
+            --target "$GITHUB_SHA" \
+            --generate-notes \
+            --title "Figwright Kiwi Reader $VERSION"

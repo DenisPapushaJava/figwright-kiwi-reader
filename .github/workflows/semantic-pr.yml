@@ -7,6 +7,12 @@ name: Semantic PR
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] title-only check, no checkout (see below)
     types: [opened, edited, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      title:
+        description: Generated pull request title
+        required: true
+        type: string
 
 # Only reads the PR title via the API — no checkout of PR code, so
 # pull_request_target is safe here.
@@ -14,14 +20,15 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: semantic-pr-${{ github.event.pull_request.number }}
+  group: semantic-pr-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
+      - if: github.event_name == 'pull_request_target'
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -74,3 +81,14 @@ jobs:
             didn't match the configured pattern. Please ensure that the subject
             doesn't start with an uppercase character (changelogen capitalizes
             it when rendering the changelog).
+
+      - name: Validate generated release title
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          PR_TITLE: ${{ inputs.title }}
+        shell: bash
+        run: |
+          if [[ ! "$PR_TITLE" =~ ^chore\(repo\):\ prepare\ Kiwi\ Reader\ v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Generated release title is invalid: $PR_TITLE" >&2
+            exit 1
+          fi
