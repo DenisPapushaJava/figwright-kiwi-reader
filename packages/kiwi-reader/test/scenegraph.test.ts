@@ -272,6 +272,75 @@ describe('SceneGraphStore', () => {
     });
   });
 
+  it('resolves an instance swap to the overridden master and subtree', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 50, localID: 1 },
+          name: 'Icon / Check little',
+          type: 'SYMBOL',
+          componentKey: 'check-key',
+        },
+        {
+          guid: { sessionID: 50, localID: 2 },
+          parentIndex: { guid: { sessionID: 50, localID: 1 } },
+          name: 'Check vector',
+          type: 'VECTOR',
+        },
+        {
+          guid: { sessionID: 51, localID: 1 },
+          name: 'Icon / Search',
+          type: 'SYMBOL',
+          componentKey: 'search-key',
+        },
+        {
+          guid: { sessionID: 51, localID: 2 },
+          parentIndex: { guid: { sessionID: 51, localID: 1 } },
+          name: 'Search vector',
+          type: 'VECTOR',
+        },
+        { guid: { sessionID: 52, localID: 1 }, name: 'Input', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 52, localID: 2 },
+          parentIndex: { guid: { sessionID: 52, localID: 1 } },
+          overrideKey: { sessionID: 520, localID: 2 },
+          name: 'Leading icon',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 50, localID: 1 } },
+        },
+        {
+          guid: { sessionID: 53, localID: 1 },
+          name: 'Input instance',
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 52, localID: 1 },
+            symbolOverrides: [
+              {
+                guidPath: { guids: [{ sessionID: 520, localID: 2 }] },
+                overriddenSymbolID: { sessionID: 51, localID: 1 },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const swapped = graph.findWithStats('53:1').node?.children[0];
+    expect(swapped).toMatchObject({
+      id: '53:1/52:2',
+      name: 'Leading icon',
+      mainComponent: { id: '51:1', name: 'Icon / Search', key: 'search-key' },
+      raw: { overriddenSymbolID: { sessionID: 51, localID: 1 } },
+      children: [{ id: '53:1/52:2/51:2', name: 'Search vector', type: 'VECTOR' }],
+    });
+    expect(swapped?.children.map(child => child.name)).not.toContain('Check vector');
+    expect(swapped === undefined ? null : normalizeCapturedNode(swapped)).toMatchObject({
+      mainComponent: { id: '51:1', name: 'Icon / Search', key: 'search-key' },
+      children: [{ name: 'Search vector' }],
+    });
+  });
+
   it('carries exposed text-property assignments through nested instances', () => {
     const graph = new SceneGraphStore();
     graph.apply({

@@ -406,6 +406,7 @@ export const createKiwiMcpServer = (
           componentInstances:
             result.stats.unresolvedInstances === 0 ? 'resolved' : 'partially-resolved',
           componentProperties: 'variants-and-boolean-visibility',
+          instanceSwaps: 'resolved-from-symbol-overrides',
           vectorAssets:
             assets.summary.vectors === 0
               ? 'not-present'
@@ -425,7 +426,8 @@ export const createKiwiMcpServer = (
         },
         assets,
         caveats: [
-          'Variables, mixed text runs, and instance-swap/slot component-property assignments are not resolved yet.',
+          'Variables and mixed text runs are not resolved yet.',
+          'When Kiwi exposes an instance swap only as an overridden symbol id, the swapped component tree is resolved but its component-property definition name is unavailable.',
           ...rasterAssetCaveats(assets.summary, result.session.captureImages),
           ...(result.stats.unresolvedInstances === 0
             ? []
