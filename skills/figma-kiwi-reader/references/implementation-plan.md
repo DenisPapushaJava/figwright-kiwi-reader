@@ -176,6 +176,11 @@ Implementation status (2026-09-19):
   PNG diff with heatmap, changed-pixel ratio and bounding box; numeric font weight, PostScript name,
   variable axes, min/max sizing, aspect ratio, overflow/fixed children, truncation/max-lines/wrap;
   UI/service-worker capability detection for unpacked-extension reload skew.
+- **Live verified:** frame `56:1424` exported 70 content-addressed assets for 101 usages (69 SVG and
+  one 1,685,741-byte PNG). The PNG checksum matched the manifest, the warm-cache recapture recovered
+  the original image after an opt-in uncached reload, and a transparent component root no longer
+  introduced a black SVG fill. Three unsupported composite vector containers were reported as
+  missing while their usable child icons were still exported.
 - **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed text runs,
   variables, non-text instance properties and native node crops. The current exporter records an
   unsupported-paint warning and never silently substitutes black for an unsupported vector paint.
