@@ -39,6 +39,9 @@ All repository changes use a branch and pull request:
 4. Merge only after CI is green. Use **Squash and merge** so the validated PR title becomes the
    Conventional Commit on `main`.
 
+Keep the Conventional Commit PR title in English. Write the PR description, rationale, validation
+notes and reviewer guidance in Russian.
+
 Do not commit or push routine development work directly to `main`. The release commit and tag
 created by the documented `pnpm release` flow are the only standing exception.
 
@@ -59,6 +62,8 @@ A few things worth knowing (full details in [AGENTS.md](./AGENTS.md)):
 
 - **[Conventional Commits](https://www.conventionalcommits.org/)**: `type(scope): subject`. The version bump and the changelog are derived from these.
 - **PR titles are validated** (`semantic-pr.yml`) and must follow the same format. PRs are **squash-merged** and the PR title becomes the commit on `main`, so write it carefully.
+- **PR descriptions are written in Russian** so the project team can review the problem, resulting
+  behavior and validation without translating them separately.
 - **Branch off `main`**, keep PRs focused, and make sure CI is green before requesting review. A
   routine change is never merged by pushing it directly to `main`.
 

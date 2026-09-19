@@ -1,26 +1,35 @@
 <!--
-Thank you for contributing to Figwright!
+Спасибо за вклад в Figwright!
 
-Before opening the PR, please make sure:
-- The PR title follows Conventional Commits, `type(scope): subject`, with a
-  lowercase subject and a scope from the nine in CONTRIBUTING.md (`codegen`,
+Перед открытием PR убедитесь:
+- Заголовок на английском соответствует Conventional Commits: `type(scope): subject` —
+  с маленькой буквы и с одним из девяти scope из CONTRIBUTING.md (`codegen`,
   `design`, `grounding`, `tools`, `relay`, `plugin`, `skills`, `deps`, `repo`).
-  It is validated by CI, and with squash merges it becomes the commit on
-  `main` and drives the changelog — write it carefully.
-- For anything non-trivial, an issue was opened first to agree on the
-  approach (see CONTRIBUTING.md).
+  CI проверяет заголовок, а после squash merge он становится коммитом в `main`
+  и попадает в changelog.
+- Описание PR написано на русском.
+- Для нетривиального изменения заранее создан issue и согласован подход
+  (см. CONTRIBUTING.md).
 -->
 
-## Description
+## Проблема
 
 <!--
-What is this PR solving, and why? Keep it clear and concise.
-Link the issues it resolves, e.g. `Fixes #123`.
+Какую проблему решает PR и почему это нужно? Пишите кратко и конкретно.
+Добавьте связанные issue, например `Fixes #123`.
 -->
 
-## Checklist
+## Изменения
 
-- [ ] The canonical checks pass locally: `pnpm typecheck && pnpm lint && pnpm format:check && pnpm knip && pnpm build && pnpm test`
-- [ ] Tests are added or updated for any behavior change (in `test/` mirroring `src/`; cross-package tests in the root `test/`)
-- [ ] Read-path / serializer changes are verified with a live round-trip against a real Figma file (plugin connected, running the built `dist`)
-- [ ] Documentation is updated if needed (README, AGENTS.md, tool descriptions)
+<!-- Что изменилось в итоговом поведении или процессе? -->
+
+## Проверка
+
+<!-- Перечислите выполненные команды и живые проверки. -->
+
+## Чек-лист
+
+- [ ] Локально прошли канонические проверки: `pnpm typecheck && pnpm lint && pnpm format:check && pnpm knip && pnpm build && pnpm test`
+- [ ] Для изменения поведения добавлены или обновлены тесты (`test/` повторяет `src/`, межпакетные тесты находятся в корневом `test/`)
+- [ ] Изменения чтения или сериализации проверены живым round-trip на реальном файле Figma с подключённым плагином и собранным `dist`
+- [ ] При необходимости обновлены README, AGENTS.md и описания инструментов
