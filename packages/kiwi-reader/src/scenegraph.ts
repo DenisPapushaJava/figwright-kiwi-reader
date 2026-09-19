@@ -157,28 +157,33 @@ const addInstanceOverrides = (
   prefix: readonly string[],
   raw: KiwiNodeChange,
 ): void => {
+  const localOverrides = new Map<string, UnknownRecord>();
   const symbolData = record(raw.symbolData);
   const symbolOverrides = symbolData?.symbolOverrides;
   if (Array.isArray(symbolOverrides)) {
-    for (const override of symbolOverrides) addOverride(overrides, prefix, override);
+    for (const override of symbolOverrides) addOverride(localOverrides, prefix, override);
   } else {
     const overrideRecord = record(symbolOverrides);
     if (overrideRecord?.guidPath !== undefined) {
-      addOverride(overrides, prefix, overrideRecord);
+      addOverride(localOverrides, prefix, overrideRecord);
     } else if (overrideRecord !== null) {
       for (const override of Object.values(overrideRecord)) {
-        addOverride(overrides, prefix, override);
+        addOverride(localOverrides, prefix, override);
       }
     }
   }
   if (Array.isArray(raw.derivedSymbolData)) {
-    for (const override of raw.derivedSymbolData) addOverride(overrides, prefix, override);
+    for (const override of raw.derivedSymbolData) addOverride(localOverrides, prefix, override);
   } else {
     const derived = record(raw.derivedSymbolData);
     const derivedOverrides = derived?.symbolOverrides ?? derived?.overrides;
     if (Array.isArray(derivedOverrides)) {
-      for (const override of derivedOverrides) addOverride(overrides, prefix, override);
+      for (const override of derivedOverrides) addOverride(localOverrides, prefix, override);
     }
+  }
+  for (const [key, local] of localOverrides) {
+    const inherited = overrides.get(key);
+    overrides.set(key, inherited === undefined ? local : mergeRecords(local, inherited));
   }
 };
 
@@ -231,6 +236,18 @@ const textAssignments = (raw: KiwiNodeChange): Map<string, string> => {
     const definitionId = guidId(assignment.defID ?? assignment.defId);
     const characters = readTextAssignment(assignment);
     if (definitionId !== null && characters !== null) assignments.set(definitionId, characters);
+  }
+  return assignments;
+};
+
+const inheritedTextAssignments = (
+  raw: KiwiNodeChange,
+  inherited: ReadonlyMap<string, string> | undefined,
+): Map<string, string> => {
+  const assignments = textAssignments(raw);
+  if (inherited === undefined) return assignments;
+  for (const [definitionId, characters] of inherited) {
+    assignments.set(definitionId, characters);
   }
   return assignments;
 };
@@ -417,7 +434,11 @@ export class SceneGraphStore {
               prefix,
               fullPath: [],
               overrides: inheritedOverrides,
-              textAssignments: textAssignments(raw),
+              // A component may expose a text property owned by a component nested several
+              // instances below it. The placed outer instance carries the user's assignment while
+              // each nested master carries its own default. Keep both scopes and let the placed
+              // instance win, otherwise expansion silently falls back to labels such as "Action".
+              textAssignments: inheritedTextAssignments(raw, context?.textAssignments),
               resolutionTrail: new Set([...(context?.resolutionTrail ?? []), masterId]),
             };
           }

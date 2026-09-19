@@ -272,6 +272,161 @@ describe('SceneGraphStore', () => {
     });
   });
 
+  it('carries exposed text-property assignments through nested instances', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 70, localID: 1 }, name: 'Button', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 70, localID: 2 },
+          parentIndex: { guid: { sessionID: 70, localID: 1 } },
+          overrideKey: { sessionID: 700, localID: 2 },
+          name: 'Label',
+          type: 'TEXT',
+          textData: { characters: 'Default action' },
+          componentPropRefs: [
+            {
+              defID: { sessionID: 700, localID: 1 },
+              componentPropNodeField: 'TEXT_DATA',
+            },
+          ],
+        },
+        { guid: { sessionID: 71, localID: 1 }, name: 'Footer', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 71, localID: 2 },
+          parentIndex: { guid: { sessionID: 71, localID: 1 } },
+          overrideKey: { sessionID: 710, localID: 2 },
+          name: 'Primary action',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 70, localID: 1 } },
+          componentPropAssignments: [
+            {
+              defID: { sessionID: 700, localID: 1 },
+              value: { textValue: { characters: 'Component default' } },
+            },
+          ],
+        },
+        {
+          guid: { sessionID: 72, localID: 1 },
+          name: 'Placed footer',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 71, localID: 1 } },
+          componentPropAssignments: [
+            {
+              defID: { sessionID: 700, localID: 1 },
+              value: { textValue: { characters: 'Сформировать отчёт' } },
+            },
+          ],
+        },
+        {
+          guid: { sessionID: 72, localID: 2 },
+          name: 'Placed footer with explicit override',
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 71, localID: 1 },
+            symbolOverrides: [
+              {
+                guidPath: {
+                  guids: [
+                    { sessionID: 710, localID: 2 },
+                    { sessionID: 700, localID: 2 },
+                  ],
+                },
+                textData: { characters: 'Явный override' },
+              },
+            ],
+          },
+          componentPropAssignments: [
+            {
+              defID: { sessionID: 700, localID: 1 },
+              value: { textValue: { characters: 'Значение свойства' } },
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = graph.findWithStats('72:1');
+    expect(result).toMatchObject({ resolvedInstances: 2, unresolvedInstances: 0 });
+    expect(result.node?.children[0]?.children[0]?.raw).toMatchObject({
+      textData: { characters: 'Сформировать отчёт' },
+    });
+
+    const componentDefault = graph.findWithStats('71:2');
+    expect(componentDefault.node?.children[0]?.raw).toMatchObject({
+      textData: { characters: 'Component default' },
+    });
+
+    const explicit = graph.findWithStats('72:2');
+    expect(explicit.node?.children[0]?.children[0]?.raw).toMatchObject({
+      textData: { characters: 'Явный override' },
+    });
+  });
+
+  it('keeps placed-instance overrides ahead of nested component defaults', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 80, localID: 1 }, name: 'Button', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 80, localID: 2 },
+          parentIndex: { guid: { sessionID: 80, localID: 1 } },
+          overrideKey: { sessionID: 800, localID: 2 },
+          name: 'Label',
+          type: 'TEXT',
+          textData: { characters: 'Button master' },
+        },
+        { guid: { sessionID: 81, localID: 1 }, name: 'Footer', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 81, localID: 2 },
+          parentIndex: { guid: { sessionID: 81, localID: 1 } },
+          overrideKey: { sessionID: 810, localID: 2 },
+          name: 'Secondary action',
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 80, localID: 1 },
+            symbolOverrides: [
+              {
+                guidPath: { guids: [{ sessionID: 800, localID: 2 }] },
+                textData: { characters: 'Nested component default' },
+              },
+            ],
+          },
+        },
+        {
+          guid: { sessionID: 82, localID: 1 },
+          name: 'Placed footer',
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 81, localID: 1 },
+            symbolOverrides: [
+              {
+                guidPath: {
+                  guids: [
+                    { sessionID: 810, localID: 2 },
+                    { sessionID: 800, localID: 2 },
+                  ],
+                },
+                textData: { characters: 'Отмена' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const placed = graph.findWithStats('82:1');
+    expect(placed).toMatchObject({ resolvedInstances: 2, unresolvedInstances: 0 });
+    expect(placed.node?.children[0]?.children[0]?.raw).toMatchObject({
+      textData: { characters: 'Отмена' },
+    });
+
+    const nestedDefault = graph.findWithStats('81:2');
+    expect(nestedDefault.node?.children[0]?.raw).toMatchObject({
+      textData: { characters: 'Nested component default' },
+    });
+  });
+
   it('bounds recursive component expansion and reports missing masters', () => {
     const graph = new SceneGraphStore();
     graph.apply({
