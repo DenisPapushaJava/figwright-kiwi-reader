@@ -46,6 +46,12 @@ paints, effects, text and auto-layout fields already confirmed on live Kiwi traf
 `editInfo`, glyph caches and other private or high-volume wire fields. A response above the hard
 payload budget becomes a section plan so an agent can request individual child sections.
 
+Component instances whose children are implicit in Kiwi are expanded from their referenced
+`SYMBOL` definition. The reader applies component text-property assignments, explicit
+`symbolOverrides`, and Figma's resolved `derivedSymbolData` without mutating the cached master.
+Expanded descendants receive instance-scoped ids, and recursive or missing component references are
+reported in the response capture metadata instead of looping or silently inventing content.
+
 Load `packages/kiwi-reader/extension` as an unpacked extension in Chrome 116 or newer. After starting
 the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose
 **Подключить макет**. Chrome shows its normal debugger notification and the extension reloads the tab

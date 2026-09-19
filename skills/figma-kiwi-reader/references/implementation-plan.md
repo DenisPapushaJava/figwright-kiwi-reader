@@ -65,8 +65,10 @@ its cache, reconnect recovers automatically, and memory/queue limits fail explic
 
 ## Phase 2: Kiwi-to-Figwright normalization
 
-Status: initial observed-property slice implemented; live parity and the remaining component/token,
-mixed-text and asset fields are still open.
+Status: the observed-property slice and read-only instance expansion are implemented. Instances are
+resolved through `symbolData.symbolID`, cloned with instance-scoped ids, and receive text component
+properties plus `symbolOverrides` / `derivedSymbolData`. Live parity for additional component
+property kinds, tokens, mixed text and assets is still open.
 
 Create a pure normalizer that emits the existing `SerializedNode` contract from `@figwright/shared`.
 Start with properties already observed live:

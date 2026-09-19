@@ -271,6 +271,11 @@ const createMcpServer = (): McpServer => {
           tabId: result.session.tabId,
           visited: result.stats.visited,
           truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
+          instanceResolution: {
+            resolved: result.stats.resolvedInstances,
+            unresolved: result.stats.unresolvedInstances,
+            cycles: result.stats.instanceCycles,
+          },
         },
       };
       const chars = JSON.stringify(output).length;
@@ -308,9 +313,19 @@ const createMcpServer = (): McpServer => {
           tabId: result.session.tabId,
           visited: result.stats.visited,
           truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
+          instanceResolution: {
+            resolved: result.stats.resolvedInstances,
+            unresolved: result.stats.unresolvedInstances,
+            cycles: result.stats.instanceCycles,
+          },
         },
         caveats: [
-          'Component identity, variables, mixed text runs and binary vector/image assets are not resolved yet.',
+          'Variables, non-text component-property assignments, mixed text runs and binary vector/image assets are not resolved yet.',
+          ...(result.stats.unresolvedInstances === 0
+            ? []
+            : [
+                `${result.stats.unresolvedInstances} component instance(s) could not be expanded because the captured graph did not contain a usable master component.`,
+              ]),
         ],
       };
       const chars = JSON.stringify(output).length;

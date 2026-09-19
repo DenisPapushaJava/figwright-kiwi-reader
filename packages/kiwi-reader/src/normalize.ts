@@ -267,7 +267,7 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
     type: node.type,
     visible: node.visible,
     locked: typeof raw.locked === 'boolean' ? raw.locked : false,
-    parentId: parentId(raw),
+    parentId: node.resolvedParentId ?? parentId(raw),
     x: finiteNumber(transform?.[0]?.[2] ?? raw.x) ?? 0,
     y: finiteNumber(transform?.[1]?.[2] ?? raw.y) ?? 0,
     width: finiteNumber(size?.x ?? raw.width) ?? 0,
@@ -366,6 +366,7 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
 
   const styleIds = normalizeStyleIds(raw);
   if (styleIds !== undefined) output.styleIds = styleIds;
+  if (node.mainComponent !== undefined) output.mainComponent = node.mainComponent;
   normalizeText(raw, output);
 
   if (node.children.length > 0) output.children = node.children.map(normalizeNodeUnchecked);

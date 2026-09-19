@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { normalizeCapturedNode } from '../src/normalize.js';
 import { SceneGraphLimitError, SceneGraphStore } from '../src/scenegraph.js';
 
 describe('SceneGraphStore', () => {
@@ -109,6 +110,209 @@ describe('SceneGraphStore', () => {
     expect(graph.findWithStats('4:1', 10, 2)).toMatchObject({
       visited: 2,
       depthLimitReached: false,
+      nodeLimitReached: true,
+    });
+  });
+
+  it('expands a component master and applies explicit and derived instance overrides', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 10, localID: 1 },
+          name: 'Screen title',
+          type: 'SYMBOL',
+          key: 'screen-title-key',
+        },
+        {
+          guid: { sessionID: 10, localID: 2 },
+          parentIndex: { guid: { sessionID: 10, localID: 1 }, position: 'a' },
+          overrideKey: { sessionID: 90, localID: 2 },
+          name: 'Project name',
+          type: 'TEXT',
+          size: { x: 180, y: 20 },
+          textData: { characters: 'Default project' },
+          fontSize: 14,
+        },
+        {
+          guid: { sessionID: 20, localID: 1 },
+          name: 'Screen title',
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 10, localID: 1 },
+            symbolOverrides: [
+              {
+                guidPath: { guids: [{ sessionID: 90, localID: 2 }] },
+                textData: { characters: 'Кировский механический завод' },
+              },
+            ],
+          },
+          derivedSymbolData: [
+            {
+              guidPath: { guids: [{ sessionID: 90, localID: 2 }] },
+              size: { x: 240, y: 24 },
+              fontSize: 16,
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = graph.findWithStats('20:1');
+    expect(result).toMatchObject({
+      visited: 2,
+      resolvedInstances: 1,
+      unresolvedInstances: 0,
+      instanceCycles: 0,
+    });
+    expect(result.node).toMatchObject({
+      id: '20:1',
+      mainComponent: { id: '10:1', name: 'Screen title', key: 'screen-title-key' },
+      children: [
+        {
+          id: '20:1/10:2',
+          resolvedParentId: '20:1',
+          raw: {
+            textData: { characters: 'Кировский механический завод' },
+            size: { x: 240, y: 24 },
+            fontSize: 16,
+          },
+        },
+      ],
+    });
+
+    expect(result.node === null ? null : normalizeCapturedNode(result.node)).toMatchObject({
+      id: '20:1',
+      mainComponent: { id: '10:1', name: 'Screen title', key: 'screen-title-key' },
+      children: [
+        {
+          id: '20:1/10:2',
+          parentId: '20:1',
+          characters: 'Кировский механический завод',
+          width: 240,
+          height: 24,
+          fontSize: 16,
+        },
+      ],
+    });
+  });
+
+  it('resolves component text properties and nested guid-path overrides', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 30, localID: 1 }, name: 'Breadcrumb', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 30, localID: 2 },
+          parentIndex: { guid: { sessionID: 30, localID: 1 } },
+          overrideKey: { sessionID: 300, localID: 2 },
+          name: 'Section',
+          type: 'TEXT',
+          textData: { characters: 'Default section' },
+          componentPropRefs: [
+            {
+              defID: { sessionID: 500, localID: 1 },
+              componentPropNodeField: 'TEXT_DATA',
+            },
+          ],
+        },
+        { guid: { sessionID: 31, localID: 1 }, name: 'Header', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 31, localID: 2 },
+          parentIndex: { guid: { sessionID: 31, localID: 1 } },
+          overrideKey: { sessionID: 310, localID: 2 },
+          name: 'Breadcrumb',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 30, localID: 1 } },
+          componentPropAssignments: [
+            {
+              defID: { sessionID: 500, localID: 1 },
+              value: { textValue: { characters: 'Безопасность' } },
+            },
+          ],
+        },
+        {
+          guid: { sessionID: 40, localID: 1 },
+          name: 'Header',
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 31, localID: 1 },
+            symbolOverrides: [
+              {
+                guidPath: {
+                  guids: [
+                    { sessionID: 310, localID: 2 },
+                    { sessionID: 300, localID: 2 },
+                  ],
+                },
+                textData: { characters: 'Производственная безопасность' },
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const result = graph.findWithStats('40:1');
+    expect(result).toMatchObject({ resolvedInstances: 2, unresolvedInstances: 0 });
+    expect(result.node?.children[0]).toMatchObject({
+      id: '40:1/31:2',
+      mainComponent: { id: '30:1', name: 'Breadcrumb' },
+      children: [
+        {
+          id: '40:1/31:2/30:2',
+          raw: { textData: { characters: 'Производственная безопасность' } },
+        },
+      ],
+    });
+
+    const directBreadcrumb = graph.findWithStats('31:2');
+    expect(directBreadcrumb.node?.children[0]?.raw).toMatchObject({
+      textData: { characters: 'Безопасность' },
+    });
+  });
+
+  it('bounds recursive component expansion and reports missing masters', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 60, localID: 1 }, name: 'Recursive', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 60, localID: 2 },
+          parentIndex: { guid: { sessionID: 60, localID: 1 } },
+          name: 'Recursive child',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 60, localID: 1 } },
+        },
+        {
+          guid: { sessionID: 61, localID: 1 },
+          name: 'Placed recursive',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 60, localID: 1 } },
+        },
+        {
+          guid: { sessionID: 61, localID: 2 },
+          name: 'Missing',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 999, localID: 1 } },
+        },
+      ],
+    });
+
+    expect(graph.findWithStats('61:1')).toMatchObject({
+      resolvedInstances: 1,
+      unresolvedInstances: 1,
+      instanceCycles: 1,
+      node: { children: [{ children: [] }] },
+    });
+    expect(graph.findWithStats('61:2')).toMatchObject({
+      resolvedInstances: 0,
+      unresolvedInstances: 1,
+      instanceCycles: 0,
+      node: { children: [] },
+    });
+    expect(graph.findWithStats('61:1', 10, 1)).toMatchObject({
+      visited: 1,
       nodeLimitReached: true,
     });
   });
