@@ -13,11 +13,15 @@ on:
         description: Generated pull request title
         required: true
         type: string
+      head_sha:
+        description: Generated pull request head commit
+        required: true
+        type: string
 
-# Only reads the PR title via the API — no checkout of PR code, so
-# pull_request_target is safe here.
-permissions:
-  pull-requests: read
+# Permissions are assigned per job. The normal PR check only reads the title;
+# the generated-release path publishes an explicit check run because GitHub
+# does not associate workflow_dispatch job checks with pull requests.
+permissions: {}
 
 concurrency:
   group: semantic-pr-${{ github.event.pull_request.number || github.ref }}
@@ -25,10 +29,12 @@ concurrency:
 
 jobs:
   validate:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: read
     steps:
-      - if: github.event_name == 'pull_request_target'
-        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -82,13 +88,50 @@ jobs:
             doesn't start with an uppercase character (changelogen capitalizes
             it when rendering the changelog).
 
-      - name: Validate generated release title
-        if: github.event_name == 'workflow_dispatch'
+  validate-generated:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: read
+    steps:
+      - name: Validate title and report the required check
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ inputs.head_sha }}
           PR_TITLE: ${{ inputs.title }}
         shell: bash
         run: |
-          if [[ ! "$PR_TITLE" =~ ^chore\(repo\):\ prepare\ Kiwi\ Reader\ v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Generated release title is invalid: $PR_TITLE" >&2
+          conclusion=success
+          summary="Generated release title follows the repository convention."
+          if [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Generated release head is invalid: $HEAD_SHA" >&2
+            exit 1
+          elif [[ ! "$PR_TITLE" =~ ^chore\(repo\):\ prepare\ Kiwi\ Reader\ v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            conclusion=failure
+            summary="Generated release title is invalid: $PR_TITLE"
+          else
+            actual_title=$(gh api \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/pulls" \
+              --jq '[.[] | select(.state == "open")][0].title // ""')
+            if [[ "$actual_title" != "$PR_TITLE" ]]; then
+              conclusion=failure
+              summary="No open pull request at $HEAD_SHA has the expected title."
+            fi
+          fi
+
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/$GITHUB_REPOSITORY/check-runs" \
+            -f name=validate \
+            -f head_sha="$HEAD_SHA" \
+            -f status=completed \
+            -f conclusion="$conclusion" \
+            -f "output[title]=Semantic PR" \
+            -f "output[summary]=$summary" >/dev/null
+
+          if [[ "$conclusion" = failure ]]; then
+            echo "$summary" >&2
             exit 1
           fi
