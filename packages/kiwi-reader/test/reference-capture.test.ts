@@ -26,4 +26,14 @@ describe('browser reference capture', () => {
       decodeReferencePng(Buffer.from('not a png body at all.......').toString('base64')),
     ).toThrow('REFERENCE_NOT_PNG');
   });
+
+  it('decodes a multi-megabyte PNG body without overflowing the stack', () => {
+    const bytes = new Uint8Array(2 * 1024 * 1024);
+    bytes.set(pngHeader(2048, 1024));
+
+    const decoded = decodeReferencePng(Buffer.from(bytes).toString('base64'));
+
+    expect(decoded.byteLength).toBe(bytes.byteLength);
+    expect(pngDimensions(decoded)).toEqual({ width: 2048, height: 1024 });
+  });
 });

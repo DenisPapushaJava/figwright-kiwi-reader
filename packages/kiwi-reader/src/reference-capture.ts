@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
+import { decodeBoundedBase64 } from './base64.js';
+
 export interface BrowserReferenceCapture {
   png: Uint8Array;
   viewport: {
@@ -14,13 +16,16 @@ export interface BrowserReferenceCapture {
 
 const PNG_SIGNATURE = Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10);
 const MAX_REFERENCE_BYTES = 32 * 1024 * 1024;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 export const decodeReferencePng = (payload: string): Uint8Array => {
-  const compact = payload.replaceAll(/\s/g, '');
-  if (!BASE64.test(compact)) throw new Error('REFERENCE_INVALID_BASE64');
-  const png = Uint8Array.from(Buffer.from(compact, 'base64'));
-  if (png.byteLength < 24 || png.byteLength > MAX_REFERENCE_BYTES) {
+  const result = decodeBoundedBase64(payload, MAX_REFERENCE_BYTES);
+  if (!result.ok) {
+    throw new Error(
+      result.reason === 'size' ? 'REFERENCE_SIZE_OUT_OF_RANGE' : 'REFERENCE_INVALID_BASE64',
+    );
+  }
+  const png = result.bytes;
+  if (png.byteLength < 24) {
     throw new Error('REFERENCE_SIZE_OUT_OF_RANGE');
   }
   if (!PNG_SIGNATURE.every((byte, index) => png[index] === byte)) {

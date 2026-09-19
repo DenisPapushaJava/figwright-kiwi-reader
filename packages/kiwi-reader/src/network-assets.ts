@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { decodeBoundedBase64 } from './base64.js';
+
 export interface CapturedNetworkAsset {
   sha1: string;
   sha256: string;
@@ -26,13 +28,14 @@ const DEFAULT_MAX_ASSET_BYTES = 16 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 128 * 1024 * 1024;
 const DEFAULT_MAX_ASSETS = 2_000;
 const IMAGE_MIME = /^image\/[a-z0-9.+-]+$/i;
-const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
-const decode = (payload: string, base64Encoded: boolean): Uint8Array | null => {
-  if (!base64Encoded) return new TextEncoder().encode(payload);
-  const compact = payload.replaceAll(/\s/g, '');
-  if (!BASE64.test(compact)) return null;
-  return Uint8Array.from(Buffer.from(compact, 'base64'));
+const decode = (payload: string, base64Encoded: boolean, maxBytes: number): Uint8Array | null => {
+  if (base64Encoded) {
+    const result = decodeBoundedBase64(payload, maxBytes);
+    return result.ok ? result.bytes : null;
+  }
+  if (Buffer.byteLength(payload, 'utf8') > maxBytes) return null;
+  return new TextEncoder().encode(payload);
 };
 
 /** Bounded, session-scoped image response cache populated by Chrome DevTools Protocol. */
@@ -68,8 +71,8 @@ export class CapturedNetworkAssetStore {
   }): CapturedNetworkAsset | null {
     this.counters.received++;
     if (!IMAGE_MIME.test(input.mimeType)) return this.reject();
-    const bytes = decode(input.payload, input.base64Encoded);
-    if (bytes === null || bytes.byteLength === 0 || bytes.byteLength > this.maxAssetBytes) {
+    const bytes = decode(input.payload, input.base64Encoded, this.maxAssetBytes);
+    if (bytes === null || bytes.byteLength === 0) {
       return this.reject();
     }
     const sha256 = createHash('sha256').update(bytes).digest('hex');
