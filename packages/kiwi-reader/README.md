@@ -74,6 +74,10 @@ variant axes are emitted as `componentProperties`. A variant also carries its pa
 id and name so component grounding can match `Button` instead of a variant-only name such as
 `Size=M, State=Enabled`. Variant axes are emitted only when the master's canonical name agrees with
 its `variantPropSpecs`; unresolved property names are not guessed.
+Instance swaps delivered as `symbolOverrides[].overriddenSymbolID` resolve to the swapped master's
+identity and descendants. Kiwi does not always include the corresponding component-property
+definition name, so the resolved component is exposed through `mainComponent` while a named
+`INSTANCE_SWAP` property is omitted rather than invented.
 Expanded descendants receive instance-scoped ids, and recursive or missing component references are
 reported in the response capture metadata instead of looping or silently inventing content.
 

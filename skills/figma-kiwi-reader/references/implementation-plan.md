@@ -73,7 +73,9 @@ Status: the observed-property slice and read-only instance expansion are impleme
 resolved through `symbolData.symbolID`, cloned with instance-scoped ids, and receive text component
 properties plus `symbolOverrides` / `derivedSymbolData`. Boolean visibility properties are applied,
 verified variant axes are normalized, and variant masters carry their component-set identity for
-grounding. Instance-swap/slot assignments, tokens, mixed text and remaining assets are still open.
+grounding. Instance swaps encoded as explicit `overriddenSymbolID` values resolve to the swapped
+master and subtree; Kiwi does not always expose their property-definition names, which remain
+deliberately unnamed. Variable-bound slots, tokens, mixed text and remaining assets are still open.
 
 Create a pure normalizer that emits the existing `SerializedNode` contract from `@figwright/shared`.
 Start with properties already observed live:
@@ -211,8 +213,8 @@ Implementation status (2026-09-19):
   introduced a black SVG fill. Three unsupported composite vector containers were reported as
   missing while their usable child icons were still exported.
 - **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed text runs,
-  variables, instance-swap/slot properties and native node crops. Boolean visibility assignments
-  and verified variant axes are supported. The current exporter records an
+  variables, variable-bound slot properties and native node crops. Boolean visibility assignments,
+  verified variant axes and explicit symbol-override swaps are supported. The current exporter records an
   unsupported-paint warning and never silently substitutes black for an unsupported vector paint.
 - **Live gate still required:** reload the unpacked extension, recapture real files containing a
   photo, composite icon, variable/mixed text and nested instance, then compare against a native or
@@ -308,7 +310,7 @@ and its manifest contains the exact fit/crop data needed to reproduce the visibl
 - Add truncation/max-lines/wrap, OpenType features and paragraph/list properties when the wire data
   proves them. Keep exact character ranges.
 - Complete min/max sizing, GRID tracks and child placement, layout grids, overflow/fixed children,
-  aspect ratio, annotations, paint/effect variable bindings and instance-swap/slot component
+  aspect ratio, annotations, paint/effect variable bindings and variable-bound slot component
   properties.
 - Report missing fonts. Do not copy font files out of Figma network traffic; generated code must use
   a project-owned/licensed font source or an explicit fallback.

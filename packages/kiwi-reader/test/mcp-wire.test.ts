@@ -242,7 +242,11 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         schemaVersion: 'figwright-kiwi-context@1',
         nodes: [{ id: '6:140', children: [{ id: '6:141', name: 'Child' }] }],
         capture: { provider: 'kiwi-browser', fileKey: 'file', tabId: 17, truncated: false },
-        capabilities: { vectorAssets: 'not-present', rasterImages: 'not-present' },
+        capabilities: {
+          vectorAssets: 'not-present',
+          rasterImages: 'not-present',
+          instanceSwaps: 'resolved-from-symbol-overrides',
+        },
         assets: { summary: { vectors: 0, images: 0 } },
       });
 
