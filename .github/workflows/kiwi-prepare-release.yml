@@ -23,7 +23,6 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     permissions:
-      actions: write # dispatch required checks for the generated branch
       contents: write # push the release branch
       pull-requests: write # open the version PR
     steps:
@@ -106,26 +105,13 @@ jobs:
 
           ## Проверка
 
-          Обязательные проверки запускаются автоматически для этой ветки.
+          PR создан как черновик. После проверки версии нажмите **Ready for review** — это запустит
+          обязательные PR-проверки от имени пользователя. После их успешного завершения выполните
+          **Squash and merge**.
           EOF
-          url=$(gh pr create --base main --head "$BRANCH" --title "$TITLE" --body-file "$body")
+          url=$(gh pr create --draft --base main --head "$BRANCH" --title "$TITLE" --body-file "$body")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
             echo "### Kiwi Reader $VERSION"
             echo "$url"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      # A workflow_dispatch job check is not associated with a pull request and cannot
-      # satisfy a required status check. semantic-pr.yml therefore publishes an explicit
-      # `validate` check run for this branch head after validating the generated title.
-      - name: Report the generated title check
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TITLE: ${{ steps.version.outputs.title }}
-        shell: bash
-        run: |
-          head_sha=$(git rev-parse HEAD)
-          gh workflow run semantic-pr.yml \
-            --ref main \
-            -f title="$TITLE" \
-            -f head_sha="$head_sha"
