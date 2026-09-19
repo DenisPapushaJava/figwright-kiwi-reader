@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "tsdown",
+    "hub": "node dist/hub.mjs",
     "mcp": "node dist/mcp.mjs",
     "serve": "node dist/serve.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"

@@ -37,9 +37,29 @@ node .\packages\kiwi-reader\dist\mcp.mjs
 ```
 
 Configure an MCP client to launch that command from the repository root. It advertises
-`browser_status`, `list_files`, `use_file`, `get_selection`, `get_node`, and
-`get_design_context`. The latter accepts a pasted Figma URL directly; when `nodeId` is omitted it
-uses the selected node from the attached tab's URL.
+`browser_status`, `list_files`, `use_file`, `get_selection`, `get_node`, `get_design_context`,
+`save_assets`, `capture_reference`, and `compare_screenshots`. `get_design_context` accepts a pasted
+Figma URL directly; when `nodeId` is omitted it uses the selected node from the attached tab's URL.
+
+## Shared MCP hub
+
+Use one shared process when Codex, Cursor, Claude, or another MCP client must read the same browser
+capture without competing for port 9224:
+
+```powershell
+$env:FIGWRIGHT_KIWI_HUB_TOKEN = '<random secret with at least 32 characters>'
+node .\packages\kiwi-reader\dist\hub.mjs
+```
+
+Connect Streamable HTTP clients to `http://127.0.0.1:9225/mcp` and send the token as
+`Authorization: Bearer <token>`. The health endpoint is `http://127.0.0.1:9225/health`. Both ports
+are configurable through `FIGWRIGHT_KIWI_PORT` and `FIGWRIGHT_KIWI_HUB_PORT`.
+
+The hub has no shared active-file switch. After `list_files`, pass `fileKey` or `tabId` to
+`get_selection`, `get_node`, `get_design_context`, `save_assets`, or `capture_reference` whenever
+more than one captured tab is available. This keeps concurrent clients isolated. If no hub token is
+set, the endpoint remains loopback-only and prints a security warning; a token is recommended for
+normal use.
 
 Normalized results use Figwright's existing `SerializedNode` contract. They retain geometry,
 paints, effects, text and auto-layout fields already confirmed on live Kiwi traffic while dropping

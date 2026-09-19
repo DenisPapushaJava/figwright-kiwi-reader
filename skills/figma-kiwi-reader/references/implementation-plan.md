@@ -11,7 +11,8 @@ Data path:
 ```text
 Figma tab -> Chrome debugger extension -> localhost capture service
           -> dynamic Kiwi decoder -> session scenegraph/cache
-          -> Figwright normalizer -> bounded read-only MCP tools -> agent
+          -> Figwright normalizer -> bounded read-only MCP tools
+          -> stdio client OR shared localhost HTTP hub -> agent
 ```
 
 ## Current status
@@ -37,8 +38,11 @@ Figma tab -> Chrome debugger extension -> localhost capture service
   queue, WebSocket message and scenegraph node limits fail explicitly.
 - A pure Kiwi-to-`SerializedNode` normalizer now validates geometry, solid/gradient/image paints,
   effects, corner/stroke data, text and horizontal/vertical auto-layout against the shared schema.
-- A separate read-only MCP entry point advertises six browser tools and applies a 2,000-node,
+- A separate read-only MCP entry point advertises bounded browser tools and applies a 2,000-node,
   depth and 1.5-million-character budget before returning data to an agent.
+- A shared Streamable HTTP hub can serve several MCP clients from one browser capture process.
+  HTTP reads route explicitly by `tabId` or `fileKey`, so one IDE cannot change another IDE's
+  active file.
 
 The implementation is under `packages/kiwi-reader`. The upstream research source and pinned commit
 are recorded in `packages/kiwi-reader/THIRD_PARTY.md`.
@@ -91,9 +95,8 @@ result field by field, and every intentional difference is documented with a fid
 
 ## Phase 3: isolated read-only MCP entry point
 
-Status: initial entry point implemented with `browser_status`, `list_files`, `use_file`,
-`get_selection`, `get_node`, and `get_design_context`; live Codex configuration and round-trip remain
-to be completed.
+Status: initial entry point implemented with status, file routing, bounded context, asset export and
+visual-reference tools. The stdio transport has completed a live Codex round-trip.
 
 Keep the first usable server separate from the bidirectional `@figwright/mcp` entry point so the
 experiment cannot regress plugin routing or writes. Reuse existing tool specs, schemas, node-id URL
@@ -112,6 +115,31 @@ them at runtime; the advertised capability surface should be honestly read-only.
 
 Exit criteria: a standard MCP client can start the server, bind a browser tab, read a pasted node
 URL, search its tree, and receive a bounded design context with no Figma plugin running.
+
+### Phase 3B: shared local multi-client hub
+
+Status: the transport foundation is implemented. `hub.mjs` owns one Kiwi capture socket and exposes
+the read tools at `http://127.0.0.1:9225/mcp`; the existing stdio entry remains compatible. Release
+installation, background lifecycle and client-specific setup helpers are still open.
+
+- Run exactly one long-lived capture owner per Windows user. Codex, Cursor, Claude and other MCP
+  clients connect to that process instead of each trying to bind port 9224.
+- Use Streamable HTTP as the client-neutral transport and keep stdio as a compatibility adapter.
+- Keep HTTP requests stateless. Every selection-dependent tool accepts `tabId` or `fileKey`; when
+  only one decoded tab exists, the most recent tab remains the safe default. Do not persist a global
+  `use_file` binding in shared mode.
+- Bind both endpoints to loopback, validate `Host` and `Origin`, cap request bodies, and support a
+  bearer token through `FIGWRIGHT_KIWI_HUB_TOKEN`. Never log the token.
+- Keep decoded graphs and image bytes only in the hub process. Clients receive bounded normalized
+  projections, so adding clients does not duplicate capture memory or expose raw Kiwi frames.
+- Add small client adapters/config generators only where a client cannot consume Streamable HTTP
+  directly. Keep the server contract identical across products.
+- Add an installer-managed background lifecycle only after start, update, crash recovery and clean
+  uninstall are proven on Windows. Do not silently create an always-on service during development.
+
+Exit criteria: two different MCP clients can concurrently read two captured tabs through one hub,
+neither client can change the other's routing, invalid local HTTP origins are rejected, and stopping
+one client does not stop browser capture for the other.
 
 ## Phase 4: budgets and large-document behavior
 

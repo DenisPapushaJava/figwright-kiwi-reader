@@ -11,7 +11,8 @@ strictly read-only and does not use Figma REST API tokens, OAuth, or the Figma P
 1. Call `browser_status` before reading. If the extension is not connected or no file has been
    decoded, report the exact status and ask the user to start capture from the FK extension.
 2. Use `get_selection` for the current selection and `get_design_context` for implementation or a
-   Figma URL. Use `list_files` and `use_file` when several decoded tabs make the target ambiguous.
+   Figma URL. When several decoded tabs make the target ambiguous, call `list_files`. In stdio mode,
+   use `use_file`; in shared HTTP mode, pass that tab's `fileKey` or `tabId` to each read.
 3. Keep reads bounded. Follow `sectionPlan` and truncation metadata by requesting smaller subtrees.
 4. Preserve node IDs and report unavailable assets, variables, fonts or component metadata.
 
