@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   ASSET_MANIFEST_SCHEMA_VERSION,
   collectDesignAssetInventory,
+  rasterAssetCaveats,
   saveVectorAssetPack,
 } from '../src/asset-pack.js';
 import { CapturedBlobStore } from '../src/blob-store.js';
@@ -92,6 +93,17 @@ const fixture = (): { root: CapturedNode; blobs: CapturedBlobStore } => {
 };
 
 describe('Kiwi asset pack', () => {
+  it('reports only raster bodies that remain unavailable', () => {
+    const summary = { vectors: 0, exportableVectors: 0, images: 2, availableImages: 2 };
+    expect(rasterAssetCaveats(summary, true)).toEqual([]);
+    expect(rasterAssetCaveats({ ...summary, availableImages: 1 }, true)).toEqual([
+      '1 of 2 raster image bodies remain unavailable; recapture the frame while the image is visible.',
+    ]);
+    expect(rasterAssetCaveats(summary, false)).toEqual([
+      '2 raster image reference(s) were found, but raster capture was disabled in the extension.',
+    ]);
+  });
+
   it('reports vector availability and image references without embedding binary data', () => {
     const { root, blobs } = fixture();
     const inventory = collectDesignAssetInventory(root, blobs);

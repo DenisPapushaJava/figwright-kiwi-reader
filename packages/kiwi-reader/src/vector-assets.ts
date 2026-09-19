@@ -350,7 +350,7 @@ const renderNode = (
 
   for (const geometry of fillPaths) {
     own.push(
-      `<path d="${geometry.path}" fill="${unsupportedFill ? 'none' : (fill?.color ?? '#000000')}" fill-opacity="${number(fill?.opacity ?? 1)}" fill-rule="${geometry.windingRule}"/>`,
+      `<path d="${geometry.path}" fill="${unsupportedFill ? 'none' : (fill?.color ?? 'none')}" fill-opacity="${number(fill?.opacity ?? 1)}" fill-rule="${geometry.windingRule}"/>`,
     );
   }
   if (vectorFallback !== null) {
@@ -360,7 +360,7 @@ const renderNode = (
   }
   for (const geometry of strokePaths) {
     own.push(
-      `<path d="${geometry.path}" fill="${unsupportedStroke ? 'none' : (stroke?.color ?? '#000000')}" fill-opacity="${number(stroke?.opacity ?? 1)}" fill-rule="${geometry.windingRule}"/>`,
+      `<path d="${geometry.path}" fill="${unsupportedStroke ? 'none' : (stroke?.color ?? 'none')}" fill-opacity="${number(stroke?.opacity ?? 1)}" fill-rule="${geometry.windingRule}"/>`,
     );
   }
 

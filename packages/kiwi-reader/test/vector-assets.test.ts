@@ -166,4 +166,53 @@ describe('Kiwi vector assets', () => {
     expect(rendered?.svg).toContain('fill="none"');
     expect(rendered?.svg).not.toContain('fill="#000000"');
   });
+
+  it('keeps paintless parent geometry transparent around a painted child', () => {
+    const blobs = new CapturedBlobStore();
+    const message = {
+      blobs: [{ bytes: commandBlob() }],
+      nodeChanges: [
+        {
+          guid: { sessionID: 6, localID: 1 },
+          name: 'Transparent instance root',
+          type: 'INSTANCE',
+          size: { x: 32, y: 32 },
+          fillGeometry: [{ commandsBlob: 0 }],
+        },
+        {
+          guid: { sessionID: 6, localID: 2 },
+          name: 'Arrow',
+          type: 'VECTOR',
+          size: { x: 24, y: 24 },
+          fillGeometry: [{ commandsBlob: 0 }],
+          fillPaints: [{ type: 'SOLID', color: { r: 0, g: 0.25, b: 0.5 } }],
+        },
+      ],
+    };
+    blobs.captureMessage(message);
+    const rendered = renderVectorSubtree(
+      {
+        id: '6:1',
+        name: 'Transparent instance root',
+        type: 'INSTANCE',
+        visible: true,
+        raw: message.nodeChanges[0] as CapturedNode['raw'],
+        children: [
+          {
+            id: '6:2',
+            name: 'Arrow',
+            type: 'VECTOR',
+            visible: true,
+            raw: message.nodeChanges[1] as CapturedNode['raw'],
+            children: [],
+          },
+        ],
+      },
+      blobs,
+    );
+
+    expect(rendered?.svg).toContain('fill="none"');
+    expect(rendered?.svg).toContain('fill="#004080"');
+    expect(rendered?.svg).not.toContain('fill="#000000"');
+  });
 });

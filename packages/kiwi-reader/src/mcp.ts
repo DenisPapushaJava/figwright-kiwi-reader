@@ -7,6 +7,7 @@ import { z } from 'zod';
 import {
   collectDesignAssetInventory,
   DESIGN_CONTEXT_SCHEMA_VERSION,
+  rasterAssetCaveats,
   saveVectorAssetPack,
 } from './asset-pack.js';
 import { KiwiCaptureServer, type KiwiCaptureSession } from './capture-server.js';
@@ -366,15 +367,7 @@ const createMcpServer = (): McpServer => {
         assets,
         caveats: [
           'Variables, non-text component-property assignments and mixed text runs are not resolved yet.',
-          ...(assets.summary.images === 0
-            ? []
-            : !result.session.captureImages
-              ? [
-                  `${assets.summary.images} raster image reference(s) were found, but raster capture was disabled in the extension.`,
-                ]
-              : [
-                  `${assets.summary.images} raster image reference(s) were found; their binary bodies are not captured yet.`,
-                ]),
+          ...rasterAssetCaveats(assets.summary, result.session.captureImages),
           ...(result.stats.unresolvedInstances === 0
             ? []
             : [

@@ -38,6 +38,24 @@ export interface DesignAssetInventory {
   };
 }
 
+export const rasterAssetCaveats = (
+  summary: DesignAssetInventory['summary'],
+  captureImages: boolean,
+): string[] => {
+  if (summary.images === 0) return [];
+  if (!captureImages) {
+    return [
+      `${summary.images} raster image reference(s) were found, but raster capture was disabled in the extension.`,
+    ];
+  }
+  const unavailable = summary.images - summary.availableImages;
+  return unavailable === 0
+    ? []
+    : [
+        `${unavailable} of ${summary.images} raster image bodies remain unavailable; recapture the frame while the image is visible.`,
+      ];
+};
+
 export interface AssetManifest {
   schemaVersion: typeof ASSET_MANIFEST_SCHEMA_VERSION;
   source: {
