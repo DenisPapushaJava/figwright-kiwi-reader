@@ -17,11 +17,12 @@ function Write-Utf8NoBom {
 
 $bundleRoot = Split-Path -Parent $PSCommandPath
 $serverEntry = Join-Path $bundleRoot 'server\mcp.mjs'
+$hubEntry = Join-Path $bundleRoot 'server\hub.mjs'
 $extensionSource = Join-Path $bundleRoot 'extension'
 $pluginSource = Join-Path $bundleRoot 'codex-plugin'
 $versionFile = Join-Path $bundleRoot 'VERSION'
 
-foreach ($required in @($serverEntry, $extensionSource, $pluginSource, $versionFile)) {
+foreach ($required in @($serverEntry, $hubEntry, $extensionSource, $pluginSource, $versionFile)) {
   if (-not (Test-Path -LiteralPath $required)) {
     throw "Release bundle is incomplete: $required is missing."
   }
@@ -99,11 +100,13 @@ $state = [ordered]@{
   installedAt = [DateTime]::UtcNow.ToString('o')
   extensionPath = $extensionTarget
   serverEntry = (Join-Path $serverTarget 'mcp.mjs')
+  hubEntry = (Join-Path $serverTarget 'hub.mjs')
 }
 Write-Utf8NoBom -Path (Join-Path $InstallDir 'install-state.json') -Content ($state | ConvertTo-Json)
 
 Write-Host ''
 Write-Host "Figwright Kiwi Reader $version installed."
 Write-Host "Chrome extension: $extensionTarget"
+Write-Host "Shared MCP hub: $(Join-Path $serverTarget 'hub.mjs')"
 Write-Host 'Open chrome://extensions, enable Developer mode, choose Load unpacked, and select that folder.'
 Write-Host 'Restart Codex, then use: @fk прочитай выбранный фрейм'

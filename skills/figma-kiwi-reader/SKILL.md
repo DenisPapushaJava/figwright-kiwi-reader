@@ -34,6 +34,10 @@ unless current evidence requires a change; when that happens, update the plan wi
   long-lived node contract.
 - Apply depth, node-count, byte, and field budgets before serializing results. A large section must
   return a section plan or explicit truncation metadata, never a multi-megabyte raw dump.
+- In the shared HTTP hub, route every read explicitly with `tabId` or `fileKey` after `list_files`
+  when more than one tab is available. Never add process-global active-file state to shared mode.
+- Keep one capture owner and fan out normalized reads through Streamable HTTP. Preserve the stdio
+  entry point as a compatibility adapter; do not start one capture server per connected IDE.
 - Keep raw dumps behind an explicit diagnostic flag. They are not MCP responses.
 - Validate incremental changes, reconnects, tab/file routing, and deletion independently from the
   initial `CREATED` snapshot.

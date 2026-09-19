@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { createServer } from 'node:http';
+import { createServer, request as httpRequest } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
 const DIST_ENTRY = join(import.meta.dirname, '..', 'dist', 'mcp.mjs');
+const HUB_ENTRY = join(import.meta.dirname, '..', 'dist', 'hub.mjs');
 
 const captureFixture = (large = false) => {
   const schema = parseSchema(`
@@ -371,6 +372,192 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       }
       expect(code).toBe(0);
       await rm(assetDirectory, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe.skipIf(!existsSync(HUB_ENTRY))('Kiwi shared MCP hub (built dist)', () => {
+  it('serves concurrent explicit targets and protects the loopback HTTP endpoint', async () => {
+    const capturePort = await freePort();
+    const hubPort = await freePort();
+    const token = '0123456789abcdef0123456789abcdef';
+    const child = spawn(process.execPath, [HUB_ENTRY], {
+      env: {
+        ...process.env,
+        FIGWRIGHT_KIWI_PORT: String(capturePort),
+        FIGWRIGHT_KIWI_HUB_PORT: String(hubPort),
+        FIGWRIGHT_KIWI_HUB_TOKEN: token,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString('utf8');
+    });
+    const ready = new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error(`Timed out waiting for hub\n${stderr}`)),
+        10_000,
+      );
+      child.stderr.on('data', () => {
+        if (!stderr.includes('shared MCP hub ready')) return;
+        clearTimeout(timeout);
+        resolve();
+      });
+      child.once('exit', code => {
+        clearTimeout(timeout);
+        reject(new Error(`Hub exited with ${code}\n${stderr}`));
+      });
+    });
+
+    const parseSse = (body: string): Record<string, unknown> => {
+      const data = body
+        .split(/\r?\n/)
+        .find(line => line.startsWith('data: '))
+        ?.slice('data: '.length);
+      expect(data).toBeTypeOf('string');
+      return JSON.parse(data ?? '{}') as Record<string, unknown>;
+    };
+    const call = async (
+      id: number,
+      method: string,
+      params: Record<string, unknown>,
+      headers: Record<string, string> = {},
+    ) =>
+      fetch(`http://127.0.0.1:${hubPort}/mcp`, {
+        method: 'POST',
+        headers: {
+          accept: 'application/json, text/event-stream',
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          'mcp-protocol-version': '2025-11-25',
+          ...headers,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+      });
+
+    let extensionSocket: WebSocket | null = null;
+    try {
+      await ready;
+
+      const health = await fetch(`http://127.0.0.1:${hubPort}/health`);
+      expect(health.status).toBe(200);
+      await expect(health.json()).resolves.toMatchObject({
+        ok: true,
+        authentication: 'bearer',
+      });
+
+      const unauthorized = await fetch(`http://127.0.0.1:${hubPort}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      expect(unauthorized.status).toBe(401);
+
+      const hostileOrigin = await call(1, 'tools/list', {}, { origin: 'https://example.com' });
+      expect(hostileOrigin.status).toBe(403);
+
+      const hostileHostStatus = await new Promise<number | undefined>((resolve, reject) => {
+        const request = httpRequest(
+          {
+            hostname: '127.0.0.1',
+            port: hubPort,
+            path: '/mcp',
+            method: 'POST',
+            headers: {
+              accept: 'application/json, text/event-stream',
+              authorization: `Bearer ${token}`,
+              'content-type': 'application/json',
+              host: 'example.com',
+            },
+          },
+          response => {
+            response.resume();
+            response.once('end', () => resolve(response.statusCode));
+          },
+        );
+        request.once('error', reject);
+        request.end(JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }));
+      });
+      expect(hostileHostStatus).toBe(403);
+
+      const listedResponse = await call(3, 'tools/list', {});
+      expect(listedResponse.status).toBe(200);
+      const listed = parseSse(await listedResponse.text());
+      const listedResult = listed.result as {
+        tools: Array<{ name: string; inputSchema: unknown }>;
+      };
+      expect(listedResult.tools.map(tool => tool.name)).not.toContain('use_file');
+      expect(listedResult.tools.find(tool => tool.name === 'get_selection')).toMatchObject({
+        inputSchema: {
+          properties: { tabId: { type: 'integer' }, fileKey: { type: 'string' } },
+        },
+      });
+
+      extensionSocket = new WebSocket(`ws://127.0.0.1:${capturePort}`, {
+        origin: 'chrome-extension://ppaieabnmndpngcaeafaooajodebhmci',
+      });
+      await new Promise<void>((resolve, reject) => {
+        extensionSocket?.once('open', resolve);
+        extensionSocket?.once('error', reject);
+      });
+      const fixture = captureFixture();
+      const capturedTabs = new Set<number>();
+      const capturesReady = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for two hub capture sessions')),
+          5_000,
+        );
+        extensionSocket?.on('message', data => {
+          const message = JSON.parse(data.toString()) as {
+            type?: string;
+            session?: { tabId?: number; nodes?: number };
+          };
+          if (message.type !== 'capture-status' || message.session?.nodes !== 2) return;
+          if (message.session.tabId !== undefined) capturedTabs.add(message.session.tabId);
+          if (capturedTabs.size !== 2) return;
+          clearTimeout(timeout);
+          resolve();
+        });
+      });
+      for (const [tabId, fileKey] of [
+        [17, 'file-a'],
+        [18, 'file-b'],
+      ] as const) {
+        extensionSocket.send(
+          JSON.stringify({
+            type: 'hello',
+            tabId,
+            url: `https://www.figma.com/design/${fileKey}/Test?node-id=6-140`,
+          }),
+        );
+        extensionSocket.send(
+          JSON.stringify({ type: 'frame', tabId, payload: fixture.schemaPayload }),
+        );
+        extensionSocket.send(
+          JSON.stringify({ type: 'frame', tabId, payload: fixture.messagePayload }),
+        );
+      }
+      await capturesReady;
+
+      const [fileAResponse, fileBResponse] = await Promise.all([
+        call(4, 'tools/call', {
+          name: 'get_selection',
+          arguments: { fileKey: 'file-a' },
+        }),
+        call(5, 'tools/call', {
+          name: 'get_design_context',
+          arguments: { fileKey: 'file-b', nodeId: '6:140', depth: 0 },
+        }),
+      ]);
+      const fileA = parseToolText(parseSse(await fileAResponse.text()));
+      const fileB = parseToolText(parseSse(await fileBResponse.text()));
+      expect(fileA).toMatchObject({ fileKey: 'file-a', selectedNodeId: '6:140' });
+      expect(fileB).toMatchObject({ capture: { fileKey: 'file-b', tabId: 18 } });
+    } finally {
+      extensionSocket?.close();
+      if (child.exitCode === null) child.kill('SIGTERM');
+      if (child.exitCode === null) await once(child, 'exit');
     }
   }, 30_000);
 });
