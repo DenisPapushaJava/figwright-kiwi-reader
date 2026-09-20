@@ -123,11 +123,15 @@ URL, search its tree, and receive a bounded design context with no Figma plugin 
 
 ### Phase 3B: shared local multi-client hub
 
-Status: the transport foundation is implemented. `hub.mjs` owns one Kiwi capture socket and exposes
-the read tools at `http://127.0.0.1:9225/mcp`; the existing stdio entry remains compatible. The Codex
-release uses a lightweight stdio-to-hub adapter, and the Windows installer starts, health-checks, and
-safely replaces its own hub during updates. Persistent pre-login startup, clean uninstall, and setup
-helpers for clients other than Codex remain open.
+Status: complete for the current Windows release scope. `hub.mjs` owns one Kiwi capture socket and
+exposes the read tools at `http://127.0.0.1:9225/mcp`; the existing stdio entry remains compatible.
+The portable release uses one lightweight stdio-to-hub adapter for Codex, Cursor, and Claude Code.
+The installer starts and health-checks the hub, merges only its own Cursor server entry, uses the
+official Claude Code CLI, and safely replaces its previous hub during updates. The uninstaller
+removes only recorded directories and client entries; changed entries are preserved. Live Windows
+smoke tests covered Cursor config preservation and real Claude Code add/get/remove. A pre-login task
+is intentionally unnecessary because the stdio adapter starts the hub on demand after a crash or
+normal shutdown.
 
 - Run exactly one long-lived capture owner per Windows user. Codex, Cursor, Claude and other MCP
   clients connect to that process instead of each trying to bind port 9224.
@@ -141,8 +145,8 @@ helpers for clients other than Codex remain open.
   projections, so adding clients does not duplicate capture memory or expose raw Kiwi frames.
 - Add small client adapters/config generators only where a client cannot consume Streamable HTTP
   directly. Keep the server contract identical across products.
-- Add an installer-managed background lifecycle only after start, update, crash recovery and clean
-  uninstall are proven on Windows. Do not silently create an always-on service during development.
+- Keep lifecycle installer-managed without an always-on Windows service: start immediately during
+  installation and restart on demand through the stdio adapter after a crash or normal shutdown.
 
 Exit criteria: two different MCP clients can concurrently read two captured tabs through one hub,
 neither client can change the other's routing, invalid local HTTP origins are rejected, and stopping
@@ -179,14 +183,30 @@ normalization. For the intended cross-client entry point, `get_implementation_co
 normalization counter. The hub then used about 393 MB working set and 370 MB private memory. This is
 another single-session diagnostic sample; the separate 65,662-node baseline remains required.
 
+The 65,662-node PM DEV capture is now covered by a release-candidate live baseline. The selected
+`✅ MVP v1.1` canvas contains 54,363 raw descendant nodes split across nine top-level sections; the
+remaining captured nodes belong to other pages and supporting trees. The first live call exposed a
+real planning defect: depth-first truncation spent all 2,000 nodes inside `Техника - Карта`, so the
+plan hid its eight later siblings. Section planning now enumerates and counts direct children from
+the captured graph before projection. On the same live capture the corrected cold call returned all
+nine sections in 341 ms and a repeat took 79 ms; the largest 19,530-node section returned all 99 of
+its immediate frames in 77 ms. After a clean hub restart and full recapture, the process used about
+637 MiB working set and 619 MiB private memory. The reload delivered 2,481 unique blobs plus 2,481
+de-duplicated repeats without unresolved references. Unit and built-stdio regressions cover both a
+large first child hiding a later sibling and a flat 2,000-section root. A final recapture through the
+packaged Codex installation loaded the newer 72,213-node PM DEV state; its `✅ MVP v1.2` canvas
+returned all four top-level sections for a 6,534-node subtree in 128 ms, confirming the installed
+artifact uses the corrected planner.
+
 - Reuse Figwright's node-count and response-size guard concepts.
 - Apply limits before constructing or JSON-stringifying a complete response.
 - Deduplicate repeated component instances while retaining text and visual overrides.
 - For an oversized root, return a section plan with child ids and estimated node counts.
 - Mark truncated depth/node results explicitly.
 - Cache normalized nodes and invalidate only entries depending on changed nodes or affected ancestors.
-- Measure capture time, normalization time, memory, and output bytes on the proven 65,662-node file;
-  establish limits from those measurements rather than guesses.
+- Repeat the 65,662-node baseline when the wire schema or capture storage changes materially; use
+  the measured section-plan latency and roughly 620-640 MiB hub memory as the current regression
+  reference rather than guessed limits.
 
 Exit criteria: requesting the large tested section never produces the previous 26.7 MB raw output,
 and the agent receives enough section ids to ground the design incrementally.
@@ -254,14 +274,42 @@ Implementation status (2026-09-20):
   concentrated in tabs, section headers, time-range controls and the footer. Because the masks cover
   most of the screen, this validates the comparison workflow but is not evidence of full-screen
   pixel parity.
+- **Release-candidate repeat:** a fresh capture of the same frame normalized 1,492 nodes with all 512
+  instances resolved and no truncation. Its asset inventory contained 854 vector usages (548 directly
+  exportable) and one available raster; `save_assets` wrote 130 unique SVGs plus the original
+  4,365,659-byte PNG for 564 de-duplicated usages, while 291 unsupported composite-vector usages were
+  reported explicitly and retained their usable child icons. A clean 1920x1080 render of the current
+  `prom-monitoring-web` mock returned no failed HTTP responses and changed 405,025/2,073,600 pixels
+  (19.5325%) against the native Figma PNG. The remaining broad difference is still explained by the
+  mock's different date, metrics, chart/table data, title and map source, so the deterministic
+  unmasked parity gate below remains open.
+- **Second-file and reconnect repeat:** Business — Extra frame `104:1923` (`1920x1080`) read 71 nodes,
+  resolved all eight instances and returned without truncation from a separate 3,448-node session.
+  A forced browser reload reconnected automatically; all 740 repeated blobs were de-duplicated and
+  retained storage stayed at 740 blobs / 2,619,679 bytes. `save_assets` wrote 14 SVGs for 15 usages;
+  the sole unavailable composite belonged to the hidden `Icon / Unloading` instance and remained an
+  explicit `VECTOR_RENDER_UNAVAILABLE` entry. Figma Inspect confirmed the candidate long text node
+  `104:1979` is uniformly Roboto 400 at 16/20 px, so this frame is not the required mixed-style case.
+  Inspect also exposed named colour styles while Kiwi returned only literal colours, confirming that
+  variable/style-name resolution remains an honest unsupported capability rather than silent data.
+- **PM DEV mixed-text sweep:** the complete `✅ MVP v1.2` canvas was split across all 50 direct
+  frame/text roots and the final Legend section, expanding 19,879 normalized nodes and inspecting
+  3,858 text nodes without truncation or read errors. Two text nodes carried explicit run boundaries:
+  `2251:152557/8:752` and `2251:153672`; in both cases every visual property was identical across the
+  two runs. The older 65,662-node `✅ MVP v1.1` capture was then split across all 364 content roots in
+  its nine sections. The expanded instance projections covered 193,252 node visits and 38,460 text
+  nodes; 12 texts carried run boundaries, but again every run used identical visual properties. Both
+  canvases therefore prove run-boundary decoding but contain no visually mixed text suitable for the
+  remaining live parity gate.
 - **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed-text links,
   lists and per-run bindings, variables, variable-bound slot properties and native node crops.
   Boolean visibility assignments, verified variant axes, explicit symbol-override swaps and
   mixed-style text runs are supported. The current exporter records an unsupported-paint warning
   and never silently substitutes black for an unsupported vector paint.
 - **Live gate still required:** compare the PM DEV frame with a deterministic fixture matching the
-  Figma map/data state so the chart, table, metrics and map remain unmasked. Also recapture a focused
-  variable/mixed-text frame before marking Phase 5 complete.
+  Figma map/data state so the chart, table, metrics and map remain unmasked. Use a separate focused
+  fixture containing genuinely different mixed-text runs and variable bindings before marking Phase
+  5 complete; the fully scanned PM DEV v1.2 canvas has neither case.
 
 Pixel-perfect is a verification target, not a property of one JSON response. The browser reader
 needs four independent layers so an error in one layer is observable instead of being repeated in

@@ -15,7 +15,7 @@ if (input === undefined) {
   const server = new KiwiCaptureServer();
   const port = await server.start();
   console.error(`Kiwi capture bridge is listening on ws://127.0.0.1:${port}`);
-  console.error('Open the target file in Chrome, then click the Figwright Kiwi Reader extension.');
+  console.error('Open the target file in Chrome, then click the FigLens extension.');
   console.error(
     'The extension will attach read-only network capture and reload the Figma tab once.',
   );

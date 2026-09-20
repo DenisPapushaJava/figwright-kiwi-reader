@@ -48,6 +48,13 @@ export interface SceneGraphFindResult {
   instanceCycles: number;
 }
 
+export interface SceneGraphSectionOutline {
+  root: { id: string; name: string; type: string };
+  totalNodes: number;
+  totalSections: number;
+  sections: Array<{ id: string; name: string; type: string; nodes: number }>;
+}
+
 export class SceneGraphLimitError extends Error {
   constructor(readonly maxNodes: number) {
     super(`Captured scene graph exceeds the ${maxNodes} node limit`);
@@ -485,6 +492,50 @@ export class SceneGraphStore {
     return this.nodes.has(normalizeNodeId(id));
   }
 
+  /**
+   * Summarizes every direct child without expanding a depth-first read first. This keeps a large
+   * first section from consuming the normal read budget and hiding its later siblings from an MCP
+   * section plan. Counts describe the captured raw subtree; component expansion may make a later
+   * normalized section larger, so callers must still apply their normal response limits.
+   */
+  sectionOutline(id: string, maxSections: number): SceneGraphSectionOutline | null {
+    const normalized = normalizeNodeId(id);
+    const root = this.nodes.get(normalized);
+    if (root === undefined) return null;
+
+    const childIds = this.buildChildIndex();
+    const directChildren = childIds.get(normalized) ?? [];
+    const countSubtree = (rootId: string): number => {
+      let count = 0;
+      const stack = [rootId];
+      const visited = new Set<string>();
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (current === undefined || visited.has(current) || !this.nodes.has(current)) continue;
+        visited.add(current);
+        count++;
+        for (const child of childIds.get(current) ?? []) stack.push(child.id);
+      }
+      return count;
+    };
+    const allSections = directChildren.map(child => {
+      const raw = this.nodes.get(child.id);
+      return {
+        id: child.id,
+        name: raw?.name ?? '',
+        type: raw?.type ?? 'UNKNOWN',
+        nodes: countSubtree(child.id),
+      };
+    });
+
+    return {
+      root: { id: normalized, name: root.name ?? '', type: root.type ?? 'UNKNOWN' },
+      totalNodes: 1 + allSections.reduce((sum, section) => sum + section.nodes, 0),
+      totalSections: allSections.length,
+      sections: allSections.slice(0, Math.max(0, maxSections)),
+    };
+  }
+
   find(id: string, maxDepth = 8, maxNodes = 2_000): CapturedNode | null {
     return this.findWithStats(id, maxDepth, maxNodes).node;
   }
@@ -505,17 +556,7 @@ export class SceneGraphStore {
       };
     }
 
-    const childIds = new Map<string, Array<{ id: string; position: string }>>();
-    for (const [childId, node] of this.nodes) {
-      if (node.parentIndex?.guid === undefined) continue;
-      const parentId = nodeId(node.parentIndex.guid);
-      const children = childIds.get(parentId) ?? [];
-      children.push({ id: childId, position: node.parentIndex.position ?? '' });
-      childIds.set(parentId, children);
-    }
-    for (const children of childIds.values()) {
-      children.sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0));
-    }
+    const childIds = this.buildChildIndex();
 
     let visited = 0;
     let nodeLimitReached = false;
@@ -670,6 +711,21 @@ export class SceneGraphStore {
       unresolvedInstances,
       instanceCycles,
     };
+  }
+
+  private buildChildIndex(): Map<string, Array<{ id: string; position: string }>> {
+    const childIds = new Map<string, Array<{ id: string; position: string }>>();
+    for (const [childId, node] of this.nodes) {
+      if (node.parentIndex?.guid === undefined) continue;
+      const parentId = nodeId(node.parentIndex.guid);
+      const children = childIds.get(parentId) ?? [];
+      children.push({ id: childId, position: node.parentIndex.position ?? '' });
+      childIds.set(parentId, children);
+    }
+    for (const children of childIds.values()) {
+      children.sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0));
+    }
+    return childIds;
   }
 
   private addAncestorChain(id: string, output: Set<string>, expanded: Set<string>): void {

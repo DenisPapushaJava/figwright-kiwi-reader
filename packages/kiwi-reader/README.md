@@ -1,4 +1,4 @@
-# Figwright Kiwi Reader experiment
+# FigLens browser reader
 
 This package tests a read-only Figma source that does not require a Figma plugin, REST token, or
 OAuth grant. A Chrome extension attaches to the active Figma tab through `chrome.debugger`, forwards
@@ -153,7 +153,7 @@ JavaScript and TypeScript configs are parsed without executing project code; imp
 computed keys, and function values are skipped and reported in `caveats`.
 
 Load `packages/kiwi-reader/extension` as an unpacked extension in Chrome 116 or newer. After starting
-the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose
+the probe or MCP server, activate the target Figma tab, click **FigLens**, and choose
 **Подключить макет**. Chrome shows its normal debugger notification and the extension reloads the tab
 once so the initial scenegraph is observable.
 
@@ -201,7 +201,7 @@ their server session, preventing stale files from remaining available to MCP rea
 - Captures only server-to-browser binary frames; sent frames are never forwarded.
 - Does not read or export Figma cookies.
 - Does not open a second multiplayer session.
-- Binds the bridge to `127.0.0.1` and accepts only the exact origin of the pinned Kiwi Reader
+- Binds the bridge to `127.0.0.1` and accepts only the exact origin of the pinned FigLens
   extension ID.
 - Stops forwarding when a single encoded frame exceeds 48 MiB or the browser bridge queue exceeds
   32 MiB. The server additionally caps WebSocket messages at 64 MiB and each scenegraph at 250,000

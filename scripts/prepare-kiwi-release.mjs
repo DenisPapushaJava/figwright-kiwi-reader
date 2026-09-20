@@ -19,7 +19,7 @@ function parseVersion(version, source) {
 export function bumpVersion(version, bump) {
   if (!BUMPS.has(bump)) throw new Error(`Unknown bump: ${bump}`);
 
-  const [major, minor, patch] = parseVersion(version, 'Current Kiwi Reader version');
+  const [major, minor, patch] = parseVersion(version, 'Current FigLens version');
   if (bump === 'major') return `${major + 1}.0.0`;
   if (bump === 'minor') return `${major}.${minor + 1}.0`;
   return `${major}.${minor}.${patch + 1}`;
@@ -52,7 +52,7 @@ export async function prepareKiwiRelease(repoRoot, bump) {
   const versions = new Set(files.map(file => file.version));
   if (versions.size !== 1) {
     throw new Error(
-      `Kiwi Reader versions do not match: ${files.map(file => `${file.path}=${file.version}`).join(', ')}`,
+      `FigLens versions do not match: ${files.map(file => `${file.path}=${file.version}`).join(', ')}`,
     );
   }
 

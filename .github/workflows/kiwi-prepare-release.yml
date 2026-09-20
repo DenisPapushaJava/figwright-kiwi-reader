@@ -1,4 +1,4 @@
-name: Prepare Kiwi Reader Release
+name: Prepare FigLens Release
 
 on:
   workflow_dispatch:
@@ -37,7 +37,7 @@ jobs:
           node-version-file: .node-version
           package-manager-cache: false
 
-      - name: Update both Kiwi Reader versions
+      - name: Update both FigLens versions
         id: version
         env:
           BUMP: ${{ inputs.bump }}
@@ -47,7 +47,7 @@ jobs:
           {
             echo "version=$version"
             echo "branch=release/kiwi-v$version"
-            echo "title=chore(repo): prepare Kiwi Reader v$version"
+            echo "title=chore(repo): prepare FigLens v$version"
           } >> "$GITHUB_OUTPUT"
 
       - name: Refuse an existing release
@@ -95,7 +95,7 @@ jobs:
           cat > "$body" <<EOF
           ## Проблема
 
-          Для выпуска Kiwi Reader версии $VERSION обе версии должны измениться синхронно.
+          Для выпуска FigLens версии $VERSION обе версии должны измениться синхронно.
 
           ## Изменения
 
@@ -112,6 +112,6 @@ jobs:
           url=$(gh pr create --draft --base main --head "$BRANCH" --title "$TITLE" --body-file "$body")
           echo "url=$url" >> "$GITHUB_OUTPUT"
           {
-            echo "### Kiwi Reader $VERSION"
+            echo "### FigLens $VERSION"
             echo "$url"
           } >> "$GITHUB_STEP_SUMMARY"

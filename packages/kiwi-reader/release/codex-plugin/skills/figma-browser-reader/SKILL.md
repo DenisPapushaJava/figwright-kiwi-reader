@@ -1,6 +1,6 @@
 ---
 name: figma-browser-reader
-description: Read the current Figma browser selection or a node from a Figma design URL through the local read-only Figwright Kiwi Reader. Use when the user mentions @fk, asks to read or inspect a selected Figma frame, requests design context from a Figma URL, or wants browser Figma data for implementation. Do not use this skill to edit Figma.
+description: Read the current Figma browser selection or a node from a Figma design URL through the local read-only FigLens reader. Use when the user mentions @fk, asks to read or inspect a selected Figma frame, requests design context from a Figma URL, or wants browser Figma data for implementation. Do not use this skill to edit Figma.
 ---
 
 # Figma browser reader

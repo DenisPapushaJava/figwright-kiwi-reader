@@ -1,4 +1,4 @@
-name: Kiwi Reader Release
+name: FigLens Release
 
 on:
   push:
@@ -51,7 +51,7 @@ jobs:
           }
           tag="kiwi-v$extension_version"
           if [[ "$GITHUB_REF_TYPE" = "tag" && "$GITHUB_REF_NAME" != "$tag" ]]; then
-            echo "Tag $GITHUB_REF_NAME does not match Kiwi Reader $extension_version" >&2
+            echo "Tag $GITHUB_REF_NAME does not match FigLens $extension_version" >&2
             exit 1
           fi
           {
@@ -67,8 +67,8 @@ jobs:
         shell: bash
         run: |
           cd artifacts
-          zip -r "figwright-kiwi-reader-v${VERSION}.zip" figwright-kiwi-reader
-          sha256sum "figwright-kiwi-reader-v${VERSION}.zip" > "figwright-kiwi-reader-v${VERSION}.sha256"
+          zip -r "figlens-v${VERSION}.zip" figlens
+          sha256sum "figlens-v${VERSION}.zip" > "figlens-v${VERSION}.sha256"
 
       - name: Publish GitHub Release
         env:
@@ -78,8 +78,8 @@ jobs:
         shell: bash
         run: |
           gh release create "$TAG" \
-            "artifacts/figwright-kiwi-reader-v${VERSION}.zip" \
-            "artifacts/figwright-kiwi-reader-v${VERSION}.sha256" \
+            "artifacts/figlens-v${VERSION}.zip" \
+            "artifacts/figlens-v${VERSION}.sha256" \
             --target "$GITHUB_SHA" \
             --generate-notes \
-            --title "Figwright Kiwi Reader $VERSION"
+            --title "FigLens $VERSION"
