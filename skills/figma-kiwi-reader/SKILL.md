@@ -57,6 +57,8 @@ unless current evidence requires a change; when that happens, update the plan wi
 - After changes to `mcp` or `shared`, build before live testing because the server runs `dist`.
 - When changing scenegraph caching, preserve dependencies outside the requested subtree: parent layout
   context, component masters, component sets, and both ancestor chains of a reparented node.
+- A pre-normalization response-size check must be a strict lower bound. Only skip the exact projection
+  when mandatory fields alone exceed the byte budget; otherwise keep the exact serialized-size gate.
 - Run the repository's canonical root gates before completion: `corepack pnpm typecheck`, `lint`,
   `format:check`, `knip`, `build`, and `test`.
 

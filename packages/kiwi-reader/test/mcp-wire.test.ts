@@ -638,16 +638,11 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       );
       await unicodeReady;
 
-      const unicodeDesign = parseToolText(
-        await send('tools/call', {
-          name: 'get_design_context',
-          arguments: { nodeId: '6:140', detail: 'full' },
-        }),
-      );
-      expect(unicodeDesign).toMatchObject({
-        sectionPlan: { reason: expect.stringMatching(/^payload \d+ bytes exceeds 1500000$/) },
-      });
-      expect(Buffer.byteLength(JSON.stringify(unicodeDesign), 'utf8')).toBeLessThan(1_500_000);
+      const statusBeforePreflight = parseToolText(
+        await send('tools/call', { name: 'browser_status', arguments: {} }),
+      ) as { sessions: Array<{ normalizationCache: { normalizations: number } }> };
+      const normalizationsBefore =
+        statusBeforePreflight.sessions[0]?.normalizationCache.normalizations;
 
       const unicodeImplementation = parseToolText(
         await send('tools/call', {
@@ -657,11 +652,43 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       );
       expect(unicodeImplementation).toMatchObject({
         sectionPlan: {
-          reason: expect.stringMatching(/^design payload \d+ bytes exceeds 1500000$/),
+          reason: expect.stringMatching(/^minimum design projection \d+ bytes exceeds 1500000$/),
         },
         deferred: ['design', 'assets', 'project', 'grounding'],
       });
       expect(unicodeImplementation).not.toHaveProperty('project');
+
+      const unicodeDesign = parseToolText(
+        await send('tools/call', {
+          name: 'get_design_context',
+          arguments: { nodeId: '6:140', detail: 'full' },
+        }),
+      );
+      expect(unicodeDesign).toMatchObject({
+        sectionPlan: {
+          reason: expect.stringMatching(/^minimum design projection \d+ bytes exceeds 1500000$/),
+        },
+      });
+      expect(Buffer.byteLength(JSON.stringify(unicodeDesign), 'utf8')).toBeLessThan(1_500_000);
+
+      const unicodeNode = parseToolText(
+        await send('tools/call', {
+          name: 'get_node',
+          arguments: { nodeId: '6:140' },
+        }),
+      );
+      expect(unicodeNode).toMatchObject({
+        sectionPlan: {
+          reason: expect.stringMatching(/^minimum node projection \d+ bytes exceeds 1500000$/),
+        },
+      });
+
+      const statusAfterPreflight = parseToolText(
+        await send('tools/call', { name: 'browser_status', arguments: {} }),
+      ) as { sessions: Array<{ normalizationCache: { normalizations: number } }> };
+      expect(statusAfterPreflight.sessions[0]?.normalizationCache.normalizations).toBe(
+        normalizationsBefore,
+      );
     } finally {
       extensionSocket?.close();
       let code = child.exitCode;
