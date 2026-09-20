@@ -15,7 +15,7 @@ import { WebSocket } from 'ws';
 const DIST_ENTRY = join(import.meta.dirname, '..', 'dist', 'mcp.mjs');
 const HUB_ENTRY = join(import.meta.dirname, '..', 'dist', 'hub.mjs');
 
-const captureFixture = (large = false) => {
+const captureFixture = (mode: 'small' | 'large' | 'unicode' = 'small') => {
   const schema = parseSchema(`
     message Guid {
       int sessionID = 1;
@@ -47,41 +47,58 @@ const captureFixture = (large = false) => {
   const schemaFrame = new Uint8Array(12 + schemaBytes.length);
   schemaFrame.set(new TextEncoder().encode('fig-wire'));
   schemaFrame.set(schemaBytes, 12);
-  const children = large
-    ? Array.from({ length: 2_000 }, (_, index) => ({
-        guid: { sessionID: 6, localID: index + 141 },
-        name: `Section ${index} ${'x'.repeat(800)}`,
-        type: 'FRAME',
-        parentIndex: {
-          guid: { sessionID: 6, localID: 140 },
-          position: `${index}`.padStart(5, '0'),
-        },
-      }))
-    : [
-        {
-          guid: { sessionID: 6, localID: 141 },
-          name: 'Child',
-          type: 'TEXT',
-          parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
-        },
-        {
-          guid: { sessionID: 6, localID: 142 },
-          name: 'Button instance',
-          type: 'INSTANCE',
-          parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
-          symbolData: { symbolID: { sessionID: 9, localID: 1 } },
-        },
-      ];
-  const masters = large
-    ? []
-    : [
-        {
-          guid: { sessionID: 9, localID: 1 },
-          name: 'Button',
-          type: 'SYMBOL',
-          componentKey: 'button-key',
-        },
-      ];
+  const children =
+    mode === 'large'
+      ? Array.from({ length: 2_000 }, (_, index) => ({
+          guid: { sessionID: 6, localID: index + 141 },
+          name: `Section ${index} ${'x'.repeat(800)}`,
+          type: 'FRAME',
+          parentIndex: {
+            guid: { sessionID: 6, localID: 140 },
+            position: `${index}`.padStart(5, '0'),
+          },
+        }))
+      : mode === 'unicode'
+        ? [
+            {
+              guid: { sessionID: 6, localID: 141 },
+              name: `Unicode ${'Ж'.repeat(800_000)}`,
+              type: 'TEXT',
+              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
+            },
+            {
+              guid: { sessionID: 6, localID: 142 },
+              name: 'Sibling section',
+              type: 'FRAME',
+              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+            },
+          ]
+        : [
+            {
+              guid: { sessionID: 6, localID: 141 },
+              name: 'Child',
+              type: 'TEXT',
+              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
+            },
+            {
+              guid: { sessionID: 6, localID: 142 },
+              name: 'Button instance',
+              type: 'INSTANCE',
+              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+              symbolData: { symbolID: { sessionID: 9, localID: 1 } },
+            },
+          ];
+  const masters =
+    mode !== 'small'
+      ? []
+      : [
+          {
+            guid: { sessionID: 9, localID: 1 },
+            name: 'Button',
+            type: 'SYMBOL',
+            componentKey: 'button-key',
+          },
+        ];
   const messageFrame = zstdCompressSync(
     codec.encodeMessage({
       nodeChanges: [
@@ -290,6 +307,18 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(node).toMatchObject({
         node: { id: '6:140', name: 'Root' },
         capture: { fileKey: 'file', tabId: 17, visited: 1, truncated: true },
+      });
+      await send('tools/call', { name: 'get_node', arguments: { nodeId: '6:140', depth: 0 } });
+      const cachedStatus = parseToolText(
+        await send('tools/call', { name: 'browser_status', arguments: {} }),
+      );
+      expect(cachedStatus).toMatchObject({
+        sessions: [
+          {
+            tabId: 17,
+            normalizationCache: { entries: 2, hits: 1, misses: 2, normalizations: 2 },
+          },
+        ],
       });
 
       const context = parseToolText(
@@ -510,7 +539,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         cropConfidence: 'viewport-only',
       });
 
-      const largeFixture = captureFixture(true);
+      const largeFixture = captureFixture('large');
       const largeReady = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error('Timed out waiting for large capture')),
@@ -571,6 +600,68 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         deferred: ['design', 'assets', 'project', 'grounding'],
         note: expect.stringContaining('get_implementation_context'),
       });
+
+      const unicodeFixture = captureFixture('unicode');
+      const unicodeReady = new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('Timed out waiting for Unicode capture')),
+          10_000,
+        );
+        extensionSocket?.on('message', data => {
+          const message = JSON.parse(data.toString()) as {
+            type?: string;
+            session?: { nodes?: number };
+          };
+          if (
+            message.type === 'capture-status' &&
+            message.session?.nodes === unicodeFixture.expectedNodes
+          ) {
+            clearTimeout(timeout);
+            resolve();
+          }
+        });
+      });
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          reset: true,
+          url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+          captureImages: false,
+        }),
+      );
+      extensionSocket.send(
+        JSON.stringify({ type: 'frame', tabId: 17, payload: unicodeFixture.schemaPayload }),
+      );
+      extensionSocket.send(
+        JSON.stringify({ type: 'frame', tabId: 17, payload: unicodeFixture.messagePayload }),
+      );
+      await unicodeReady;
+
+      const unicodeDesign = parseToolText(
+        await send('tools/call', {
+          name: 'get_design_context',
+          arguments: { nodeId: '6:140', detail: 'full' },
+        }),
+      );
+      expect(unicodeDesign).toMatchObject({
+        sectionPlan: { reason: expect.stringMatching(/^payload \d+ bytes exceeds 1500000$/) },
+      });
+      expect(Buffer.byteLength(JSON.stringify(unicodeDesign), 'utf8')).toBeLessThan(1_500_000);
+
+      const unicodeImplementation = parseToolText(
+        await send('tools/call', {
+          name: 'get_implementation_context',
+          arguments: { nodeId: '6:140', rootDir: '\0' },
+        }),
+      );
+      expect(unicodeImplementation).toMatchObject({
+        sectionPlan: {
+          reason: expect.stringMatching(/^design payload \d+ bytes exceeds 1500000$/),
+        },
+        deferred: ['design', 'assets', 'project', 'grounding'],
+      });
+      expect(unicodeImplementation).not.toHaveProperty('project');
     } finally {
       extensionSocket?.close();
       let code = child.exitCode;
@@ -584,7 +675,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(code).toBe(0);
       await rm(assetDirectory, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 45_000);
 });
 
 describe.skipIf(!existsSync(HUB_ENTRY))('Kiwi shared MCP hub (built dist)', () => {

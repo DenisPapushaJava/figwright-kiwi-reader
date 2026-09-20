@@ -14,7 +14,7 @@ import {
   saveVectorAssetPack,
 } from './asset-pack.js';
 import { KiwiCaptureServer, type KiwiCaptureSession } from './capture-server.js';
-import { normalizeCapturedNode } from './normalize.js';
+import { NormalizedNodeCache, type CachedNodeRead } from './normalized-node-cache.js';
 import { comparePngFiles } from './png-diff.js';
 import {
   analyzePortableProject,
@@ -28,7 +28,7 @@ import { mapProjectTokens } from './token-grounding.js';
 
 const DEFAULT_MAX_NODES = 2_000;
 const DEFAULT_MAX_DEPTH = 12;
-const MAX_RESPONSE_CHARS = 1_500_000;
+const MAX_RESPONSE_BYTES = 1_500_000;
 const MAX_SECTION_PLAN_SECTIONS = 200;
 const MAX_SECTION_NAME_CHARS = 500;
 const MAX_ASSET_INVENTORY_ENTRIES = 1_000;
@@ -50,9 +50,24 @@ interface SessionTarget {
   tabId?: number;
 }
 
-const textResult = (value: unknown): CallToolResult => ({
-  content: [{ type: 'text', text: JSON.stringify(value) }],
+const serializedTextResult = (text: string): CallToolResult => ({
+  content: [{ type: 'text', text }],
 });
+
+const serializeJson = (value: unknown): string => JSON.stringify(value);
+const serializedBytes = (text: string): number => Buffer.byteLength(text, 'utf8');
+const jsonBytes = (value: unknown): number => serializedBytes(serializeJson(value));
+const textResult = (value: unknown): CallToolResult => serializedTextResult(serializeJson(value));
+
+const normalizationCaches = new WeakMap<KiwiCaptureSession, NormalizedNodeCache>();
+
+const normalizationCache = (session: KiwiCaptureSession): NormalizedNodeCache => {
+  const existing = normalizationCaches.get(session);
+  if (existing !== undefined) return existing;
+  const created = new NormalizedNodeCache();
+  normalizationCaches.set(session, created);
+  return created;
+};
 
 const activeSessions = (capture: KiwiCaptureServer): KiwiCaptureSession[] =>
   capture
@@ -129,18 +144,31 @@ const pickNode = (
       'No node id was provided and the active Figma tab has no selected node in its URL.',
     );
   }
-  const result = session.graph.findWithStats(
+  const cache = normalizationCache(session);
+  const cached = cache.read(
+    session.graph,
     selectedNodeId,
     options.depth ?? DEFAULT_MAX_DEPTH,
     options.maxNodes ?? DEFAULT_MAX_NODES,
   );
+  const result = cached.result;
   if (result.node === null) {
     throw new Error(
       `Node ${selectedNodeId} is not present in the captured graph for file ${session.fileKey}. ` +
         'Reload the Figma tab with the reader enabled if it was selected after capture.',
     );
   }
-  return { session, selectedNodeId, captured: result.node, stats: result };
+  return { session, selectedNodeId, captured: result.node, stats: result, cache, cached };
+};
+
+const normalizedPickedNode = (result: {
+  captured: CapturedNode;
+  cache: NormalizedNodeCache;
+  cached: CachedNodeRead;
+}): SerializedNode => {
+  const normalized = result.cache.normalize(result.cached);
+  if (normalized === null) throw new Error(`Node ${result.captured.id} disappeared during read`);
+  return normalized;
 };
 
 const projectNode = (node: SerializedNode, detail: DetailLevel): Record<string, unknown> => {
@@ -190,7 +218,7 @@ const groundingRoots = (
     ...(options.tabId === undefined ? {} : { tabId: options.tabId }),
     ...(options.fileKey === undefined ? {} : { fileKey: options.fileKey }),
   });
-  const projected = projectNode(normalizeCapturedNode(result.captured), 'full');
+  const projected = projectNode(normalizedPickedNode(result), 'full');
   const truncated = result.stats.nodeLimitReached || result.stats.depthLimitReached;
   return {
     roots: [DesignContextNodeSchema.parse(projected)],
@@ -273,7 +301,7 @@ const sectionPlanRoot = (result: ReturnType<typeof pickNode>): CapturedNode =>
       result.captured);
 
 const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel) => {
-  const projected = projectNode(normalizeCapturedNode(result.captured), detail);
+  const projected = projectNode(normalizedPickedNode(result), detail);
   const assets = designAssets(result.captured, result.session);
   return {
     schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
@@ -344,7 +372,12 @@ export const createKiwiMcpServer = (
     },
     () =>
       textResult({
-        ...capture.status,
+        connected: capture.status.connected,
+        sessions: capture.listSessions().map(session =>
+          Object.assign(session.status, {
+            normalizationCache: normalizationCache(session).stats,
+          }),
+        ),
         boundTabId: persistentRouting ? routing.boundTabId : null,
         routing: persistentRouting ? 'connection-bound' : 'explicit-target',
       }),
@@ -417,9 +450,11 @@ export const createKiwiMcpServer = (
         ...(fileKey === undefined ? {} : { fileKey }),
       });
       if (session.selectedNodeId === null) return textResult({ nodes: [] });
-      const node = session.graph.find(session.selectedNodeId, 0, 1);
+      const cache = normalizationCache(session);
+      const cached = cache.read(session.graph, session.selectedNodeId, 0, 1);
+      const node = cache.normalize(cached);
       return textResult({
-        nodes: node === null ? [] : [normalizeCapturedNode(node)],
+        nodes: node === null ? [] : [node],
         fileKey: session.fileKey,
         selectedNodeId: session.selectedNodeId,
       });
@@ -446,7 +481,7 @@ export const createKiwiMcpServer = (
         ...(fileKey === undefined ? {} : { fileKey }),
       });
       const output = {
-        node: normalizeCapturedNode(result.captured),
+        node: normalizedPickedNode(result),
         capture: {
           fileKey: result.session.fileKey,
           tabId: result.session.tabId,
@@ -459,14 +494,15 @@ export const createKiwiMcpServer = (
           },
         },
       };
-      const chars = JSON.stringify(output).length;
-      if (chars > MAX_RESPONSE_CHARS) {
+      const serialized = serializeJson(output);
+      const bytes = serializedBytes(serialized);
+      if (bytes > MAX_RESPONSE_BYTES) {
         return textResult({
           node: { id: result.captured.id, name: result.captured.name, type: result.captured.type },
-          ...sectionPlan(result.captured, `payload ${chars} chars exceeds ${MAX_RESPONSE_CHARS}`),
+          ...sectionPlan(result.captured, `payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`),
         });
       }
-      return textResult(output);
+      return serializedTextResult(serialized);
     },
   );
 
@@ -492,13 +528,14 @@ export const createKiwiMcpServer = (
         ...(fileKey === undefined ? {} : { fileKey }),
       });
       const output = designContext(result, detail ?? 'full');
-      const chars = JSON.stringify(output).length;
-      if (chars > MAX_RESPONSE_CHARS) {
+      const serialized = serializeJson(output);
+      const bytes = serializedBytes(serialized);
+      if (bytes > MAX_RESPONSE_BYTES) {
         return textResult(
-          sectionPlan(result.captured, `payload ${chars} chars exceeds ${MAX_RESPONSE_CHARS}`),
+          sectionPlan(result.captured, `payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`),
         );
       }
-      return textResult(output);
+      return serializedTextResult(serialized);
     },
   );
 
@@ -678,6 +715,23 @@ export const createKiwiMcpServer = (
         });
       }
       const context = designContext(result, 'full');
+      const designBytes = jsonBytes(context);
+      if (designBytes > MAX_RESPONSE_BYTES) {
+        const plan = sectionPlan(
+          sectionPlanRoot(result),
+          `design payload ${designBytes} bytes exceeds ${MAX_RESPONSE_BYTES}`,
+        );
+        return textResult({
+          schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
+          designSchemaVersion: plan.schemaVersion,
+          nodes: plan.nodes,
+          sectionPlan: plan.sectionPlan,
+          capture: context.capture,
+          deferred: ['design', 'assets', 'project', 'grounding'],
+          caveats: context.caveats,
+          note: 'Request each section nodeId with get_implementation_context using the same rootDir.',
+        });
+      }
       const roots = context.nodes.map(node => DesignContextNodeSchema.parse(node));
       const projectProfile = await analyzePortableProject(rootDir);
       const [componentMap, iconMap, tokenMap] = await Promise.all([
@@ -736,11 +790,12 @@ export const createKiwiMcpServer = (
         },
         grounding: { components, icons, tokens },
       };
-      const chars = JSON.stringify(output).length;
-      if (chars > MAX_RESPONSE_CHARS) {
+      const serialized = serializeJson(output);
+      const bytes = serializedBytes(serialized);
+      if (bytes > MAX_RESPONSE_BYTES) {
         const plan = sectionPlan(
           sectionPlanRoot(result),
-          `implementation payload ${chars} chars exceeds ${MAX_RESPONSE_CHARS}`,
+          `implementation payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`,
         );
         return textResult({
           schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
@@ -765,7 +820,7 @@ export const createKiwiMcpServer = (
           note: 'Request each section nodeId with get_implementation_context using the same rootDir.',
         });
       }
-      return textResult(output);
+      return serializedTextResult(serialized);
     },
   );
 

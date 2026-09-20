@@ -395,6 +395,7 @@ const instanceMasterId = (raw: KiwiNodeChange): string | null => {
 /** Incrementally merges the node changes already delivered to the authenticated Figma tab. */
 export class SceneGraphStore {
   private readonly nodes = new Map<string, KiwiNodeChange>();
+  private currentRevision = 0;
 
   constructor(private readonly maxNodes = 250_000) {}
 
@@ -402,7 +403,13 @@ export class SceneGraphStore {
     return this.nodes.size;
   }
 
+  /** Monotonically increases whenever a decoded change mutates this captured graph. */
+  get revision(): number {
+    return this.currentRevision;
+  }
+
   clear(): void {
+    if (this.nodes.size > 0) this.currentRevision++;
     this.nodes.clear();
   }
 
@@ -429,6 +436,7 @@ export class SceneGraphStore {
       else this.nodes.set(id, { ...this.nodes.get(id), ...change });
       applied++;
     }
+    if (applied > 0) this.currentRevision++;
     return applied;
   }
 
