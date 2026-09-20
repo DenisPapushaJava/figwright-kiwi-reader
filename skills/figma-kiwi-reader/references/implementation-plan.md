@@ -157,8 +157,10 @@ serialized UTF-8 bytes, and an oversized design slice returns before any project
 use a bounded per-session captured/normalized-subtree LRU cache. Each cache entry tracks the source
 nodes, parent layout context, component masters and component sets used to construct it. Incremental
 updates invalidate only entries intersecting the changed node's old or new ancestor chain; a bounded
-change history falls back to conservative rebuilding when an entry is too old. A cheaper
-pre-normalization size estimate and the 65,662-node timing/memory baseline remain open.
+change history falls back to conservative rebuilding when an entry is too old. Read tools now compute
+a strict UTF-8 lower bound from mandatory projected fields before normalization; only a proven
+over-budget tree takes the early `sectionPlan` path, while every other response retains the exact
+post-serialization gate. The 65,662-node timing/memory baseline remains open.
 
 A pre-change live baseline on the available 22,391-node file read a 1,838-node selected frame with
 626 resolved instances into a 977,472-byte UTF-8 response. Two sequential reads through the previously

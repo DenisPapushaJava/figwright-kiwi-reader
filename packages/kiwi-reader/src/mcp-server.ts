@@ -22,6 +22,7 @@ import {
   mapProjectIcons,
   scanPortableComponents,
 } from './project-grounding.js';
+import { minimumProjectedNodeBytes } from './projection-budget.js';
 import { saveReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, type CapturedNode } from './scenegraph.js';
 import { mapProjectTokens } from './token-grounding.js';
@@ -300,6 +301,17 @@ const sectionPlanRoot = (result: ReturnType<typeof pickNode>): CapturedNode =>
     : (result.session.graph.find(result.selectedNodeId, 1, MAX_SECTION_PLAN_SECTIONS + 1) ??
       result.captured);
 
+const projectionBudgetReason = (
+  root: CapturedNode,
+  detail: DetailLevel,
+  label: string,
+): string | null => {
+  const minimumBytes = minimumProjectedNodeBytes(root, detail);
+  return minimumBytes > MAX_RESPONSE_BYTES
+    ? `minimum ${label} projection ${minimumBytes} bytes exceeds ${MAX_RESPONSE_BYTES}`
+    : null;
+};
+
 const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel) => {
   const projected = projectNode(normalizedPickedNode(result), detail);
   const assets = designAssets(result.captured, result.session);
@@ -480,6 +492,13 @@ export const createKiwiMcpServer = (
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
+      const preflightReason = projectionBudgetReason(result.captured, 'full', 'node');
+      if (preflightReason !== null) {
+        return textResult({
+          node: { id: result.captured.id, name: result.captured.name, type: result.captured.type },
+          ...sectionPlan(result.captured, preflightReason),
+        });
+      }
       const output = {
         node: normalizedPickedNode(result),
         capture: {
@@ -527,7 +546,12 @@ export const createKiwiMcpServer = (
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
-      const output = designContext(result, detail ?? 'full');
+      const resolvedDetail = detail ?? 'full';
+      const preflightReason = projectionBudgetReason(result.captured, resolvedDetail, 'design');
+      if (preflightReason !== null) {
+        return textResult(sectionPlan(result.captured, preflightReason));
+      }
+      const output = designContext(result, resolvedDetail);
       const serialized = serializeJson(output);
       const bytes = serializedBytes(serialized);
       if (bytes > MAX_RESPONSE_BYTES) {
@@ -710,6 +734,22 @@ export const createKiwiMcpServer = (
           deferred: ['design', 'assets', 'project', 'grounding'],
           caveats: [
             `The captured subtree was truncated after ${result.stats.visited} nodes; request its sections before project grounding.`,
+          ],
+          note: 'Request each section nodeId with get_implementation_context using the same rootDir.',
+        });
+      }
+      const preflightReason = projectionBudgetReason(result.captured, 'full', 'design');
+      if (preflightReason !== null) {
+        const plan = sectionPlan(sectionPlanRoot(result), preflightReason);
+        return textResult({
+          schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
+          designSchemaVersion: plan.schemaVersion,
+          nodes: plan.nodes,
+          sectionPlan: plan.sectionPlan,
+          capture: captureMetadata(result),
+          deferred: ['design', 'assets', 'project', 'grounding'],
+          caveats: [
+            `The design's minimum structural projection exceeds the response budget; request its sections before project grounding.`,
           ],
           note: 'Request each section nodeId with get_implementation_context using the same rootDir.',
         });
