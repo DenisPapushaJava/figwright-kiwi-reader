@@ -1,18 +1,19 @@
-# Figwright Kiwi Reader
+# FigLens
 
 [![CI](https://github.com/DenisPapushaJava/figwright-kiwi-reader/actions/workflows/ci.yml/badge.svg)](https://github.com/DenisPapushaJava/figwright-kiwi-reader/actions/workflows/ci.yml)
 [![Actionlint](https://github.com/DenisPapushaJava/figwright-kiwi-reader/actions/workflows/actionlint.yml/badge.svg)](https://github.com/DenisPapushaJava/figwright-kiwi-reader/actions/workflows/actionlint.yml)
 [![Zizmor](https://github.com/DenisPapushaJava/figwright-kiwi-reader/actions/workflows/zizmor.yml/badge.svg)](https://github.com/DenisPapushaJava/figwright-kiwi-reader/actions/workflows/zizmor.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-**Figwright Kiwi Reader** — локальный инструмент для чтения макетов Figma прямо из браузера и
+**FigLens** — локальный инструмент для чтения макетов Figma прямо из браузера и
 передачи структуры выбранного фрейма в Codex или другой MCP-клиент.
 
 Проект решает конкретную задачу: открыть доступный вам макет в браузерной Figma, выбрать нужный
 фрейм, нажать кнопку расширения и попросить агента прочитать дизайн. Запуск Figma-плагина, токен
 REST API, OAuth и право администратора макета для этого не требуются.
 
-> Текущая версия: **0.4.0**. Kiwi Reader работает только на чтение и не может изменять макет.
+> Актуальная версия указана в [последнем GitHub Release](https://github.com/DenisPapushaJava/figwright-kiwi-reader/releases/latest).
+> FigLens работает только на чтение и не может изменять макет.
 
 ## Как это работает
 
@@ -20,7 +21,7 @@ REST API, OAuth и право администратора макета для �
 Figma в Chrome
     │ входящие бинарные WebSocket-кадры Kiwi
     ▼
-расширение Figwright Kiwi Reader
+расширение FigLens
     │ локальный WebSocket, только 127.0.0.1
     ▼
 локальный MCP-сервер или общий MCP-хаб
@@ -33,7 +34,7 @@ Codex / другой MCP-клиент
 бинарные кадры Figma и передаёт их локальному серверу. Сервер восстанавливает scenegraph, удаляет
 служебные и слишком объёмные поля и предоставляет ограниченный набор read-only MCP-инструментов.
 
-Kiwi Reader не обращается к Figma REST API, поэтому REST-лимиты к этому способу чтения не
+FigLens не обращается к Figma REST API, поэтому REST-лимиты к этому способу чтения не
 относятся. При этом пользователь должен быть авторизован в Figma и иметь обычный доступ к самому
 файлу: инструмент не обходит права доступа к макету.
 
@@ -64,7 +65,7 @@ Kiwi Reader не обращается к Figma REST API, поэтому REST-л�
 | `capture_reference`   | Сохранить снимок видимой области Figma              |
 | `compare_screenshots` | Построить отчёт и heatmap различий                  |
 
-Команд записи, повторной отправки сетевых кадров и изменения Figma в Kiwi Reader нет.
+Команд записи, повторной отправки сетевых кадров и изменения Figma во FigLens нет.
 
 ## Ограничения
 
@@ -80,21 +81,21 @@ Kiwi Reader не обращается к Figma REST API, поэтому REST-л�
 - Чтение всего большого файла создаёт очень объёмный результат. Для вёрстки лучше выбирать экран,
   секцию или компонент.
 
-Используйте Reader только для файлов, к которым у вас есть законный доступ, и учитывайте правила
+Используйте FigLens только для файлов, к которым у вас есть законный доступ, и учитывайте правила
 вашей организации по работе с дизайн-данными.
 
 ## Установка готового релиза
 
 1. Откройте раздел [Releases](https://github.com/DenisPapushaJava/figwright-kiwi-reader/releases).
-2. Скачайте `figwright-kiwi-reader-vX.Y.Z.zip` и файл с контрольной суммой `.sha256`.
+2. Скачайте `figlens-vX.Y.Z.zip` и файл с контрольной суммой `.sha256`.
 3. Распакуйте ZIP в постоянную папку и запустите `install.ps1`:
 
    ```powershell
    .\install.ps1
    ```
 
-4. Установщик разместит файлы в `%LOCALAPPDATA%\FigwrightKiwi`, подключит локальный MCP-сервер и
-   персональный Codex-плагин `fk`.
+4. Установщик разместит файлы в `%LOCALAPPDATA%\FigwrightKiwi`, подключит локальный MCP-сервер к
+   Codex, Cursor и Claude Code и сохранит персональный Codex-плагин `fk`.
 5. Откройте `chrome://extensions`, включите **Режим разработчика**, нажмите
    **Загрузить распакованное расширение** и выберите путь, напечатанный установщиком:
 
@@ -102,18 +103,26 @@ Kiwi Reader не обращается к Figma REST API, поэтому REST-л�
    %LOCALAPPDATA%\FigwrightKiwi\extension
    ```
 
-6. Перезапустите Codex.
+6. Перезапустите используемые MCP-клиенты.
 
 Установщик требует Node.js 24 или новее. `pnpm`, исходники проекта и папка `node_modules` для
 готового релиза не нужны. Если PowerShell блокирует скачанный сценарий, выполните
 `Unblock-File .\install.ps1` и запустите его снова.
 
+Для настройки только выбранных клиентов передайте параметр `-Clients`, например
+`.\install.ps1 -Clients Cursor,ClaudeCode`. Для полного удаления используйте сохранённый сценарий:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\FigwrightKiwi\uninstall.ps1"
+```
+
 Пока первый GitHub Release ещё не опубликован, используйте [запуск из исходников](#запуск-из-исходников).
 
 ### Один захват для Codex, Cursor и Claude
 
-Установленный по умолчанию `mcp.mjs` обслуживает один клиент. Для одновременной работы нескольких
-MCP-клиентов запустите один общий процесс:
+Установщик подключает все выбранные клиенты через один `stdio-proxy.mjs`. Адаптер использует общий
+hub и запускает его заново по требованию, поэтому отдельная служба или задача автозапуска Windows не
+нужна. Для клиента, которому требуется прямой Streamable HTTP, hub можно запустить вручную:
 
 ```powershell
 $env:FIGWRIGHT_KIWI_HUB_TOKEN = '<случайный секрет длиной не менее 32 символов>'
@@ -130,7 +139,7 @@ scenegraph в памяти. При нескольких вкладках аге�
 1. Убедитесь, что Codex запущен с установленным плагином `fk`.
 2. Откройте нужный файл на `figma.com` в Chrome.
 3. Выберите фрейм или слой. Его `node-id` должен появиться в адресе вкладки.
-4. Нажмите значок **Figwright Kiwi Reader**.
+4. Нажмите значок **FigLens**.
 5. При необходимости нажмите значок скрепки: управление откроется в боковой панели и не закроется,
    когда вы вернётесь к холсту.
 6. Если для вёрстки нужны фотографии и другие растровые заливки, включите
@@ -207,7 +216,7 @@ node .\packages\kiwi-reader\dist\mcp.mjs
 corepack pnpm package:kiwi
 ```
 
-Результат появится в `artifacts\figwright-kiwi-reader`.
+Результат появится в `artifacts\figlens`.
 
 ## Проверка изменений
 
@@ -229,7 +238,7 @@ Actionlint и безопасность workflows через Zizmor.
 
 ## Релизный цикл
 
-Версия Kiwi Reader хранится в:
+Версия FigLens хранится в:
 
 - `packages/kiwi-reader/extension/manifest.json`;
 - `packages/kiwi-reader/release/codex-plugin/.codex-plugin/plugin.json`.
@@ -242,9 +251,9 @@ git tag kiwi-v0.3.1
 git push origin kiwi-v0.3.1
 ```
 
-Workflow `Kiwi Reader Release` повторно выполнит все проверки, соберёт ZIP, создаст SHA-256 и
+Workflow `FigLens Release` повторно выполнит все проверки, соберёт ZIP, создаст SHA-256 и
 опубликует GitHub Release. Простые теги `v*` зарезервированы унаследованным релизным процессом
-исходного Figwright и для Kiwi Reader не используются.
+исходного Figwright и для FigLens не используются.
 
 ## Структура репозитория
 
@@ -253,7 +262,7 @@ packages/kiwi-reader/
   extension/       Chrome-расширение, popup и боковая панель
   src/             декодер, локальный bridge и MCP-сервер
   release/         установщик и шаблон Codex-плагина
-  test/            тесты Kiwi Reader
+  test/            тесты FigLens
 scripts/
   package-kiwi-release.mjs
 skills/figma-kiwi-reader/
@@ -262,7 +271,7 @@ skills/figma-kiwi-reader/
 
 Репозиторий основан на открытом [Figwright](https://github.com/awdr74100/figwright). В нём
 сохранена исходная кодовая база, но продукт, который мы развиваем и выпускаем здесь, — read-only
-браузерный Kiwi Reader из `packages/kiwi-reader`. Оригинальный репозиторий подключён разработчикам
+браузерный FigLens из `packages/kiwi-reader`. Оригинальный репозиторий подключён разработчикам
 как Git remote `upstream` только для осознанного переноса полезных обновлений.
 
 Подробности реализации находятся в

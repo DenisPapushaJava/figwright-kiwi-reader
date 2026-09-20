@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const artifactsRoot = resolve(root, 'artifacts');
-const target = resolve(artifactsRoot, 'figwright-kiwi-reader');
+const target = resolve(artifactsRoot, 'figlens');
 const packageRoot = resolve(root, 'packages', 'kiwi-reader');
 
 const assertInside = (parent, candidate) => {
@@ -35,9 +35,10 @@ await Promise.all([
     recursive: true,
   }),
   cp(join(packageRoot, 'release', 'install.ps1'), join(target, 'install.ps1')),
+  cp(join(packageRoot, 'release', 'uninstall.ps1'), join(target, 'uninstall.ps1')),
   cp(join(root, 'README.ru.md'), join(target, 'README.ru.md')),
   cp(join(root, 'LICENSE'), join(target, 'LICENSE')),
 ]);
 
 await writeFile(join(target, 'VERSION'), `${version}\n`, 'utf8');
-console.log(`Kiwi Reader ${version} staged at ${target}`);
+console.log(`FigLens ${version} staged at ${target}`);

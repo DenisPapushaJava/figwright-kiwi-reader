@@ -51,23 +51,23 @@ const getState = tabId => tabStates.get(tabId) ?? initialState(tabId);
 const badgeForState = state => {
   switch (state.phase) {
     case 'ready':
-      return { text: '✓', color: '#16803c', title: 'Figwright: макет готов к чтению' };
+      return { text: '✓', color: '#16803c', title: 'FigLens: макет готов к чтению' };
     case 'reading':
-      return { text: 'SYNC', color: '#2563eb', title: 'Figwright: чтение узлов Figma' };
+      return { text: 'SYNC', color: '#2563eb', title: 'FigLens: чтение узлов Figma' };
     case 'connecting':
     case 'reloading':
     case 'waiting':
-      return { text: '…', color: '#9a6700', title: 'Figwright: подключение к Figma' };
+      return { text: '…', color: '#9a6700', title: 'FigLens: подключение к Figma' };
     case 'reconnecting':
-      return { text: 'WAIT', color: '#9a6700', title: 'Figwright: локальный MCP недоступен' };
+      return { text: 'WAIT', color: '#9a6700', title: 'FigLens: локальный MCP недоступен' };
     case 'error':
       return {
         text: 'ERR',
         color: '#b42318',
-        title: `Figwright: ${state.errorCode ?? 'ошибка'}`,
+        title: `FigLens: ${state.errorCode ?? 'ошибка'}`,
       };
     default:
-      return { text: '', color: '#666666', title: 'Figwright Kiwi Reader' };
+      return { text: '', color: '#666666', title: 'FigLens' };
   }
 };
 
@@ -239,7 +239,7 @@ const resyncAttachedTabs = async () => {
           captureReloadOptions(captureImages),
         );
       } catch (error) {
-        console.error('[Figwright Kiwi Reader] reconnect', error);
+        console.error('[FigLens] reconnect', error);
         await reportError(tabId, 'CAPTURE_RESTART_FAILED', error);
       }
     }),
@@ -515,7 +515,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         try {
           await reportError(tabId, code, error);
         } catch (reportingError) {
-          console.error('[Figma Kiwi] Failed to publish extension error state:', reportingError);
+          console.error('[FigLens] Failed to publish extension error state:', reportingError);
         }
       }
       sendResponse({ ok: false, error: error.message, code });

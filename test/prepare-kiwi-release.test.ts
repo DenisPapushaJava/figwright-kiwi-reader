@@ -31,14 +31,26 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
 
-describe('Kiwi Reader release preparation', () => {
-  it('keeps the installer ASCII-compatible with Windows PowerShell 5.1', async () => {
-    const installer = await readFile(
-      join(import.meta.dirname, '../packages/kiwi-reader/release/install.ps1'),
+describe('FigLens release preparation', () => {
+  it.each(['install.ps1', 'uninstall.ps1'])(
+    'keeps %s ASCII-compatible with Windows PowerShell 5.1',
+    async script => {
+      const contents = await readFile(
+        join(import.meta.dirname, '../packages/kiwi-reader/release', script),
+        'utf8',
+      );
+
+      expect([...contents].every(character => character.charCodeAt(0) <= 0x7f)).toBe(true);
+    },
+  );
+
+  it('packages the clean uninstaller with the portable release', async () => {
+    const packageScript = await readFile(
+      join(import.meta.dirname, '../scripts/package-kiwi-release.mjs'),
       'utf8',
     );
 
-    expect([...installer].every(character => character.charCodeAt(0) <= 0x7f)).toBe(true);
+    expect(packageScript).toContain("release', 'uninstall.ps1'");
   });
 
   it.each([
@@ -70,7 +82,7 @@ describe('Kiwi Reader release preparation', () => {
     const root = await fixture('0.3.1', '0.3.0');
 
     await expect(prepareKiwiRelease(root, 'patch')).rejects.toThrow(
-      'Kiwi Reader versions do not match',
+      'FigLens versions do not match',
     );
   });
 });

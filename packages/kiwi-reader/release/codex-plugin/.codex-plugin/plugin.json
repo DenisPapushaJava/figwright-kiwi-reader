@@ -1,7 +1,7 @@
 {
   "name": "fk",
   "version": "0.4.0",
-  "description": "Read the current Figma browser selection through the local Figwright Kiwi bridge.",
+  "description": "Read the current Figma browser selection through the local FigLens bridge.",
   "author": {
     "name": "DenisPapusha"
   },
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "FK",
     "shortDescription": "Read Figma frames from the browser.",
-    "longDescription": "Connects Codex to the local read-only Figwright Kiwi Reader so any task can inspect the selected Figma frame or a node from a Figma URL.",
+    "longDescription": "Connects Codex to the local read-only FigLens reader so any task can inspect the selected Figma frame or a node from a Figma URL.",
     "developerName": "DenisPapusha",
     "category": "Productivity",
     "capabilities": ["Read"],

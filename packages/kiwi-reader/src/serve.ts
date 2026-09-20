@@ -3,8 +3,8 @@ import { type CaptureStatus, KiwiCaptureServer } from './index.js';
 
 const server = new KiwiCaptureServer();
 const port = await server.start();
-console.error(`Figwright Kiwi capture service is listening on ws://127.0.0.1:${port}`);
-console.error('Open a Figma file in Chrome and click the Figwright Kiwi Reader extension.');
+console.error(`FigLens capture service is listening on ws://127.0.0.1:${port}`);
+console.error('Open a Figma file in Chrome and click the FigLens extension.');
 
 let lastStatus = '';
 server.on('status', (status: CaptureStatus) => {
