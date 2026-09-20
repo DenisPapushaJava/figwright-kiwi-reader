@@ -941,22 +941,34 @@ export const createKiwiMcpServer = (
     'compare_screenshots',
     {
       description:
-        'Compare equal-sized reference and implementation PNGs, write a heatmap, and report the exact changed-pixel ratio and bounding box.',
+        'Compare equal-sized reference and implementation PNGs, optionally exclude explicit dynamic regions, write a heatmap, and report exact changed-pixel ratios and bounds.',
       inputSchema: z.object({
         referencePath: z.string().min(1),
         actualPath: z.string().min(1),
         diffPath: z.string().min(1),
         tolerance: z.number().int().min(0).max(255).optional(),
+        ignoreRegions: z
+          .array(
+            z.object({
+              x: z.number().int().min(0),
+              y: z.number().int().min(0),
+              width: z.number().int().positive(),
+              height: z.number().int().positive(),
+            }),
+          )
+          .max(256)
+          .optional(),
       }),
       annotations: LOCAL_WRITE,
     },
-    async ({ referencePath, actualPath, diffPath, tolerance }) =>
+    async ({ referencePath, actualPath, diffPath, tolerance, ignoreRegions }) =>
       textResult(
         await comparePngFiles({
           referencePath,
           actualPath,
           diffPath,
           ...(tolerance === undefined ? {} : { tolerance }),
+          ...(ignoreRegions === undefined ? {} : { ignoreRegions }),
         }),
       ),
   );

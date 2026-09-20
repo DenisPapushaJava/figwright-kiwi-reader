@@ -231,28 +231,37 @@ tool-schema cost against the loss of discoverability and validation.
 
 ## Phase 5: pixel-fidelity pipeline
 
-Implementation status (2026-09-19):
+Implementation status (2026-09-20):
 
 - **Implemented:** bounded message-local blob preservation; command/vector-network decoding;
   content-addressed SVG and raster asset pack; optional `image/*` CDP body capture (off by default in
   the extension UI, with an uncached reload only when opted in); versioned
-  design-context/capability report; viewport reference capture; exact
-  PNG diff with heatmap, changed-pixel ratio and bounding box; numeric font weight, PostScript name,
-  variable axes, min/max sizing, aspect ratio, overflow/fixed children, truncation/max-lines/wrap;
-  UI/service-worker capability detection for unpacked-extension reload skew.
+  design-context/capability report; viewport reference capture; exact PNG diff with heatmap,
+  changed-pixel ratio and bounding box; explicit auditable dynamic-region masks with both compared
+  and whole-image ratios; numeric font weight, PostScript name, variable axes, min/max sizing,
+  aspect ratio, overflow/fixed children, truncation/max-lines/wrap; UI/service-worker capability
+  detection for unpacked-extension reload skew.
 - **Live verified:** frame `56:1424` exported 70 content-addressed assets for 101 usages (69 SVG and
   one 1,685,741-byte PNG). The PNG checksum matched the manifest, the warm-cache recapture recovered
   the original image after an opt-in uncached reload, and a transparent component root no longer
   introduced a black SVG fill. Three unsupported composite vector containers were reported as
   missing while their usable child icons were still exported.
+- **Full-screen baseline:** PM DEV frame `380:23063` (`1920x1080`) resolved all 512 component
+  instances and exposed 823 vector nodes plus one available raster image. Against the native Figma
+  PNG, the live project screenshot changed 430,635/2,073,600 pixels (20.7675%) because it used a
+  different map and live dataset. Seven explicit dynamic masks left 361,259 pixels to compare:
+  15,220 changed (4.2130% of compared pixels, 0.7340% of the whole image). The remaining diff is
+  concentrated in tabs, section headers, time-range controls and the footer. Because the masks cover
+  most of the screen, this validates the comparison workflow but is not evidence of full-screen
+  pixel parity.
 - **Deliberately reported as partial:** gradient/mask/filter-heavy vector SVGs, mixed-text links,
   lists and per-run bindings, variables, variable-bound slot properties and native node crops.
   Boolean visibility assignments, verified variant axes, explicit symbol-override swaps and
   mixed-style text runs are supported. The current exporter records an unsupported-paint warning
   and never silently substitutes black for an unsupported vector paint.
-- **Live gate still required:** reload the unpacked extension, recapture real files containing a
-  photo, composite icon, variable/mixed text and nested instance, then compare against a native or
-  viewport PNG before marking Phase 5 complete.
+- **Live gate still required:** compare the PM DEV frame with a deterministic fixture matching the
+  Figma map/data state so the chart, table, metrics and map remain unmasked. Also recapture a focused
+  variable/mixed-text frame before marking Phase 5 complete.
 
 Pixel-perfect is a verification target, not a property of one JSON response. The browser reader
 needs four independent layers so an error in one layer is observable instead of being repeated in
@@ -366,7 +375,9 @@ wrapping/grid layout and an instance with text/boolean/variant/instance-swap pro
   cannot validate its own renderer.
 - Add a comparison report for equal-sized PNGs: changed-pixel ratio, perceptual score, bounding box
   of differences and a heatmap/diff file. Ignore no pixels by default; optional tolerances must be
-  explicit and recorded.
+  explicit and recorded. Dynamic map/chart/data regions may be excluded only through explicit,
+  reported rectangles; report both compared and ignored pixels so a low ratio cannot hide a broadly
+  masked screen.
 - Update `figma-codegen` to require this loop for pixel-fidelity work: implement -> fixed-viewport
   screenshot -> diff -> inspect largest regions -> adjust -> repeat. Exact structured values always
   outrank measurements inferred from screenshots.

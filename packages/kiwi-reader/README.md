@@ -43,6 +43,11 @@ Configure an MCP client to launch that command from the repository root. It adve
 `get_design_context` accepts a pasted Figma URL directly; when `nodeId` is omitted it uses the
 selected node from the attached tab's URL.
 
+`compare_screenshots` compares every pixel by default. For live pages whose map, chart, clock, or
+data values intentionally differ from the Figma fixture, pass explicit `ignoreRegions` rectangles.
+The report records the clipped rectangles, unique ignored/compared pixel counts, the ratio among
+compared pixels, and the ratio against the full image so the masked result stays auditable.
+
 For code generation, prefer one `get_implementation_context` call with the codebase's absolute
 `rootDir`. It returns full design context, asset inventory, project profile, component/icon reuse,
 and observed-color token candidates under one response budget. If the captured tree is truncated or
