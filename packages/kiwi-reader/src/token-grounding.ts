@@ -14,6 +14,7 @@ import { parseTailwindConfig, parseUnoConfig } from '../../mcp/src/tokens/js-con
 import { aggregateRepoCssTokens } from '../../mcp/src/tokens/repo-css.js';
 import { aggregateRepoScssTokens } from '../../mcp/src/tokens/repo-scss.js';
 import { type ProjectToken, refOf } from '../../mcp/src/tokens/tokens.js';
+import { buildDependencyCatalog, type DependencyCatalog } from './dependency-catalog.js';
 import { analyzePortableProject, type PortableProjectProfile } from './project-grounding.js';
 
 const MAX_CANDIDATES = 3;
@@ -67,6 +68,9 @@ export interface KiwiTokenMapResult {
   unresolvedStyleRefs: KiwiStyleReference[];
   profile: PortableProjectProfile;
   projectTokenCount: number;
+  localTokenCount: number;
+  dependencyTokenCount: number;
+  dependencyPackages: string[];
   tokenFiles: string[];
   scanMode: typeof SCAN_MODE;
   variableBindings: 'unavailable';
@@ -274,15 +278,32 @@ const scanStaticTokenConfig = async (
   return { tokens: parsed.tokens, files: [configPath], caveats };
 };
 
-const candidateFrom = (token: ProjectToken, utilityFirst: boolean): KiwiTokenCandidate => ({
-  token: token.name,
-  ref: refOf(token, utilityFirst),
-  ...(token.cssVar === undefined ? {} : { cssVar: token.cssVar }),
-  ...(token.utility === undefined ? {} : { utility: token.utility }),
-  ...(token.from === undefined ? {} : { from: token.from }),
-  confidence: 0.9,
-  matchedBy: ['value'],
-});
+const tokenKey = (token: ProjectToken): string =>
+  [
+    token.name,
+    token.value,
+    token.cssVar ?? '',
+    token.utility ?? '',
+    token.scssVar ?? '',
+    token.from ?? '',
+  ].join('\u0000');
+
+const candidateFrom = (
+  token: ProjectToken,
+  utilityFirst: boolean,
+  dependencySource?: string,
+): KiwiTokenCandidate => {
+  const from = dependencySource ?? token.from;
+  return {
+    token: token.name,
+    ref: refOf(token, utilityFirst),
+    ...(token.cssVar === undefined ? {} : { cssVar: token.cssVar }),
+    ...(token.utility === undefined ? {} : { utility: token.utility }),
+    ...(from === undefined ? {} : { from }),
+    confidence: 0.9,
+    matchedBy: ['value'],
+  };
+};
 
 /**
  * Join colors actually observed in the captured subtree to portable project tokens. Kiwi does not
@@ -293,13 +314,15 @@ export const mapProjectTokens = async (input: {
   rootDir: string;
   captureCaveats?: readonly string[];
   profile?: PortableProjectProfile;
+  dependencyCatalog?: DependencyCatalog;
 }): Promise<KiwiTokenMapResult> => {
   const rootDir = resolve(input.rootDir);
   const profile = input.profile ?? (await analyzePortableProject(rootDir));
-  const [css, scss, config] = await Promise.all([
+  const [css, scss, config, dependencyCatalog] = await Promise.all([
     aggregateRepoCssTokens(rootDir),
     aggregateRepoScssTokens(rootDir),
     scanStaticTokenConfig(rootDir, profile),
+    input.dependencyCatalog ?? buildDependencyCatalog(rootDir),
   ]);
   // A framework config and a generated CSS/SCSS mirror can carry the same semantic declaration.
   // Prefer the config's real utility reference for an identical name+value pair; different names or
@@ -310,7 +333,16 @@ export const mapProjectTokens = async (input: {
   const mirroredTokens = [...scss.tokens, ...css.tokens].filter(
     token => !configDeclarations.has(`${token.name}\u0000${token.value}`),
   );
-  const projectTokens = dedupeTokens([...config.tokens, ...mirroredTokens]);
+  const localTokens = dedupeTokens([...config.tokens, ...mirroredTokens]);
+  const localTokenKeys = new Set(localTokens.map(tokenKey));
+  const dependencyTokens = dependencyCatalog.tokens.filter(
+    item => !localTokenKeys.has(tokenKey(item.token)),
+  );
+  const dependencySourceByToken = new Map<string, string>();
+  for (const dependency of dependencyTokens) {
+    dependencySourceByToken.set(tokenKey(dependency.token), dependency.sourceImport);
+  }
+  const projectTokens = dedupeTokens([...localTokens, ...dependencyTokens.map(item => item.token)]);
   const utilityFirst = profile.styling.system === 'tailwind' || profile.styling.system === 'unocss';
   const projectByValue = new Map<string, ProjectToken[]>();
   for (const token of projectTokens) {
@@ -340,7 +372,11 @@ export const mapProjectTokens = async (input: {
       mappings.push({
         ...base,
         status: 'medium',
-        candidate: candidateFrom(matches[0] as ProjectToken, utilityFirst),
+        candidate: candidateFrom(
+          matches[0] as ProjectToken,
+          utilityFirst,
+          dependencySourceByToken.get(tokenKey(matches[0] as ProjectToken)),
+        ),
       });
       continue;
     }
@@ -352,7 +388,11 @@ export const mapProjectTokens = async (input: {
         candidateCount: matches.length,
         ...(matches.length > MAX_CANDIDATES
           ? {}
-          : { candidates: ordered.map(token => candidateFrom(token, utilityFirst)) }),
+          : {
+              candidates: ordered.map(token =>
+                candidateFrom(token, utilityFirst, dependencySourceByToken.get(tokenKey(token))),
+              ),
+            }),
       });
       continue;
     }
@@ -378,6 +418,11 @@ export const mapProjectTokens = async (input: {
     unresolvedStyleRefs,
     profile,
     projectTokenCount: projectTokens.length,
+    localTokenCount: localTokens.length,
+    dependencyTokenCount: dependencyTokens.length,
+    dependencyPackages: [...new Set(dependencyTokens.map(item => item.sourceImport))].toSorted(
+      compare,
+    ),
     tokenFiles: [...new Set([...config.files, ...css.files, ...scss.files])].toSorted(compare),
     scanMode: SCAN_MODE,
     variableBindings: 'unavailable',
@@ -385,6 +430,7 @@ export const mapProjectTokens = async (input: {
       'Matches use exact color-value equality only. They are reuse candidates, not proven Figma variable bindings.',
       'Captured shared-style ids are opaque: Kiwi exposes stable ids but not their Figma names or definitions.',
       ...config.caveats,
+      ...dependencyCatalog.caveats,
       ...(input.captureCaveats ?? []),
     ],
     ...(omitted === 0 ? {} : { truncationNote: truncationNote('stylesheet files', omitted) }),

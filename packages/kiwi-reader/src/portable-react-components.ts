@@ -145,7 +145,7 @@ const destructuredProps = (parameter: AstNode): { names: string[]; complete: boo
 };
 
 const propsOfFunction = (fn: AstNode, table: TypeTable): PropsResult => {
-  const parameter = fn.params?.[0] as AstNode | undefined;
+  const parameter = (fn.params?.[0] ?? fn.parameters?.[0]) as AstNode | undefined;
   if (parameter === undefined) return NO_PROPS;
   const destructured = destructuredProps(parameter);
   const annotation = parameter.typeAnnotation?.typeAnnotation;
@@ -175,6 +175,18 @@ const propsFromComponentType = (identifier: AstNode, table: TypeTable): PropsRes
   if (props === undefined) return null;
   const names = resolveTypeMembers(props, table);
   return names === null ? UNKNOWN_PROPS : { names, extracted: true };
+};
+
+/**
+ * A declaration file has no initializer to inspect. Its public component can instead be written as
+ * `export declare const Icon: (props: IconProps) => JSX.Element` or as a React component type. Keep
+ * this separate from the source-file path so ordinary exported constants are not promoted just
+ * because they are PascalCase.
+ */
+const propsFromDeclaredComponent = (identifier: AstNode, table: TypeTable): PropsResult | null => {
+  const annotation = identifier.typeAnnotation?.typeAnnotation;
+  if (annotation?.type === 'TSFunctionType') return propsOfFunction(annotation, table);
+  return propsFromComponentType(identifier, table);
 };
 
 const calleeName = (callee: AstNode): string | undefined =>
@@ -227,7 +239,10 @@ const candidatesOfDeclaration = (node: AstNode, table: TypeTable): Candidate[] =
   }
   return (node.declarations ?? []).flatMap((declaration: AstNode) => {
     const fn = functionOf(declaration.init);
-    if (fn === null) return [];
+    if (fn === null) {
+      const declared = propsFromDeclaredComponent(declaration.id, table);
+      return declared === null ? [] : [{ name: declaration.id?.name ?? null, props: declared }];
+    }
     const typed = propsFromComponentType(declaration.id, table);
     const fromFunction = propsOfFunction(fn, table);
     return [

@@ -24,7 +24,11 @@ strictly read-only and does not use Figma REST API tokens, OAuth, or the Figma P
 5. Reuse high-confidence component/icon matches, verify medium matches, and treat
    `matchedBy: ['value']` token candidates as name-blind evidence, not proven Figma bindings. React
    prop contracts marked complete may produce actionable unmatched-prop gaps; unknown or incomplete
-   contracts in any framework are not evidence that props are absent.
+   contracts in any framework are not evidence that props are absent. For dependency candidates,
+   use the returned package/component/prop import contract; never assume a specific UI library from
+   its brand or from prior projects. For a named icon, prefer `icon_map`'s registry contract over a
+   generic `component_map` match to the package's `Icon` wrapper because the registry result carries
+   the required prop value.
 6. Preserve node IDs and report unavailable assets, variables, fonts or component metadata.
 
 Never request Figma cookies, authentication tokens, a personal access token or edit permission.

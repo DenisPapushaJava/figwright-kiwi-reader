@@ -3,17 +3,28 @@ import { basename, dirname, extname, join, resolve } from 'node:path';
 
 import type { DesignContextNode } from '@figwright/shared';
 
-import { detectIconLibraries, scanRepoSvgs } from '../../mcp/src/icons/repo-icons.js';
+import { scanRepoSvgs, type SvgColorContract } from '../../mcp/src/icons/repo-icons.js';
+import { casefold } from '../../mcp/src/join/casefold.js';
 import {
   collectFigmaComponents,
   type ComponentMapping,
   joinComponents,
   parseMapFile,
 } from '../../mcp/src/join/component-map.js';
-import { collectFigmaIcons, type IconMapping, joinIcons } from '../../mcp/src/join/icon-map.js';
+import {
+  collectFigmaIcons,
+  iconLabel,
+  type IconMapping,
+  joinIcons,
+} from '../../mcp/src/join/icon-map.js';
 import { analyzeProject, type ProjectProfile } from '../../mcp/src/profile/profile.js';
 import { truncationNote, walkRepoFiles } from '../../mcp/src/repo-walk.js';
 import type { ComponentFramework, ScannedComponent } from '../../mcp/src/scan/scan.js';
+import {
+  buildDependencyCatalog,
+  type DependencyCatalog,
+  type DependencyIcon,
+} from './dependency-catalog.js';
 import { extractPortableReactComponents } from './portable-react-components.js';
 
 const DEFAULT_THRESHOLD = 0.7;
@@ -24,10 +35,34 @@ const PORTABLE_SCAN_CAVEAT =
   'The standalone Kiwi bundle statically reads React component props with a pure JavaScript parser. ' +
   'Vue, Svelte and Angular prop coverage remains unknown, so unmatchedProps is not inferred for those scans.';
 
-interface PackageJson {
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
+export type KiwiComponentMapping = Omit<ComponentMapping, 'candidate'> & {
+  candidate?: NonNullable<ComponentMapping['candidate']> & {
+    origin?: 'dependency';
+    import?: { from: string; kind: 'default' | 'named'; name: string };
+  };
+};
+
+export interface DependencyIconCandidate {
+  kind: 'dependency-registry';
+  packageName: string;
+  import: { from: string; name: string; props: Record<string, string> };
+  colorContract: SvgColorContract;
+  recolor: string;
+  confidence: number;
 }
+
+export interface DependencyComponentIconCandidate {
+  kind: 'dependency-component';
+  packageName: string;
+  import: { from: string; kind: 'default' | 'named'; name: string };
+  colorContract: 'unknown';
+  recolor: string;
+  confidence: number;
+}
+
+export type KiwiIconMapping = Omit<IconMapping, 'candidate'> & {
+  candidate?: IconMapping['candidate'] | DependencyIconCandidate | DependencyComponentIconCandidate;
+};
 
 export interface PortableProjectProfile extends ProjectProfile {
   scanMode: typeof PORTABLE_SCAN_MODE;
@@ -41,10 +76,13 @@ export interface PortableComponentScan {
 }
 
 export interface KiwiComponentMapResult {
-  mappings: ComponentMapping[];
+  mappings: KiwiComponentMapping[];
   unmapped: string[];
   profile: PortableProjectProfile;
   scannedComponentCount: number;
+  localComponentCount: number;
+  dependencyComponentCount: number;
+  dependencyPackages: string[];
   scanMode: typeof PORTABLE_SCAN_MODE;
   caveats: string[];
   staleOverrides?: { figmaComponentName: string; name: string; filePath: string }[];
@@ -52,11 +90,13 @@ export interface KiwiComponentMapResult {
 }
 
 export interface KiwiIconMapResult {
-  mappings: IconMapping[];
+  mappings: KiwiIconMapping[];
   unmapped: string[];
   iconLibraries: string[];
   profile: PortableProjectProfile;
   svgFileCount: number;
+  dependencyIconCount: number;
+  dependencyPackages: string[];
   caveats: string[];
   truncationNote?: string;
 }
@@ -66,19 +106,6 @@ const fileExists = async (path: string): Promise<boolean> =>
     () => true,
     () => false,
   );
-
-const readPackageJson = async (rootDir: string): Promise<PackageJson | null> => {
-  try {
-    return JSON.parse(await readFile(join(rootDir, 'package.json'), 'utf8')) as PackageJson;
-  } catch {
-    return null;
-  }
-};
-
-const dependenciesOf = (value: PackageJson | null): Record<string, string> => ({
-  ...value?.dependencies,
-  ...value?.devDependencies,
-});
 
 export const analyzePortableProject = async (rootDir: string): Promise<PortableProjectProfile> => {
   const profile = await analyzeProject(rootDir);
@@ -248,22 +275,133 @@ const readOverrides = async (
   return { overrides, overridesOnDisk };
 };
 
+const iconPathKey = (value: string): string => {
+  const parts = value
+    .split('/')
+    .map(part => casefold(part))
+    .filter(Boolean);
+  if (/^icons?$/.test(parts[0] ?? '')) parts[0] = 'icons';
+  return parts.join('/');
+};
+
+const dependencyIconMatch = (
+  label: string,
+  figmaName: string,
+  icons: readonly DependencyIcon[],
+): DependencyIcon | null => {
+  const exact = icons.filter(icon => iconPathKey(icon.value) === iconPathKey(figmaName));
+  if (exact.length === 1) return exact[0] ?? null;
+  const byLabel = icons.filter(
+    icon =>
+      casefold(icon.name) === casefold(label) ||
+      casefold(iconLabel(icon.value)) === casefold(label),
+  );
+  // Reusing the wrong icon is worse than exporting a fresh one. A basename that occurs in several
+  // registry folders stays unmapped unless Figma carried the folder and selected it above.
+  return byLabel.length === 1 ? (byLabel[0] ?? null) : null;
+};
+
+const dependencyIconRecolor = (contract: SvgColorContract): string => {
+  if (contract === 'currentColor') {
+    return 'recolorable through the dependency component color/currentColor contract; mirror an existing project usage';
+  }
+  if (contract === 'fixed') return 'fixed color in the dependency asset; render as-is';
+  if (contract === 'multi-color') return 'multi-color dependency asset; render as-is';
+  return 'dependency asset color contract is unknown; inspect an existing project usage before recoloring';
+};
+
+const dependencyIconCandidate = (icon: DependencyIcon): DependencyIconCandidate => ({
+  kind: 'dependency-registry',
+  packageName: icon.packageName,
+  import: {
+    from: icon.importPath,
+    name: icon.componentName,
+    props: { [icon.propName]: icon.value },
+  },
+  colorContract: icon.colorContract,
+  recolor: dependencyIconRecolor(icon.colorContract),
+  confidence: 1,
+});
+
+const dependencyComponentIconMatch = (
+  label: string,
+  catalog: DependencyCatalog,
+): DependencyCatalog['components'][number] | null => {
+  let matches = catalog.components.filter(
+    item => casefold(item.component.name) === casefold(label),
+  );
+  if (matches.some(item => item.observed)) matches = matches.filter(item => item.observed);
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+};
+
+const dependencyComponentIconCandidate = (
+  component: DependencyCatalog['components'][number],
+): DependencyComponentIconCandidate => ({
+  kind: 'dependency-component',
+  packageName: component.packageName,
+  import: {
+    from: component.importPath,
+    kind: component.exportKind,
+    name: component.importName,
+  },
+  colorContract: 'unknown',
+  recolor:
+    'component color contract is unknown; mirror an existing project usage before recoloring',
+  confidence: 0.9,
+});
+
 export const mapProjectComponents = async (input: {
   roots: readonly DesignContextNode[];
   rootDir: string;
   threshold?: number;
   captureCaveats?: readonly string[];
   profile?: PortableProjectProfile;
+  dependencyCatalog?: DependencyCatalog;
 }): Promise<KiwiComponentMapResult> => {
   const threshold = input.threshold ?? DEFAULT_THRESHOLD;
-  const [scan, overrideState] = await Promise.all([
+  const [scan, overrideState, dependencyCatalog] = await Promise.all([
     scanPortableComponents(input.rootDir, undefined, input.profile),
     readOverrides(resolve(input.rootDir)),
+    input.dependencyCatalog ?? buildDependencyCatalog(input.rootDir),
   ]);
-  const mappings = joinComponents(collectFigmaComponents(input.roots), scan.components, {
-    threshold,
-    ...(overrideState.overrides.size === 0 ? {} : overrideState),
-  });
+  const observedDependencyNames = new Set(
+    dependencyCatalog.components
+      .filter(item => item.observed)
+      .map(item => casefold(item.component.name)),
+  );
+  const dependencyComponents = dependencyCatalog.components
+    .filter(item => !observedDependencyNames.has(casefold(item.component.name)) || item.observed)
+    .map(item => item.component);
+  const rawMappings = joinComponents(
+    collectFigmaComponents(input.roots),
+    [...scan.components, ...dependencyComponents],
+    {
+      threshold,
+      ...(overrideState.overrides.size === 0 ? {} : overrideState),
+    },
+  );
+  const dependencyByCandidate = new Map(
+    dependencyCatalog.components.map(item => [
+      `${item.component.filePath}\u0000${item.component.name}`,
+      item,
+    ]),
+  );
+  const mappings = rawMappings as KiwiComponentMapping[];
+  for (const mapping of mappings) {
+    if (mapping.candidate === undefined) continue;
+    const dependency = dependencyByCandidate.get(
+      `${mapping.candidate.filePath}\u0000${mapping.candidate.name}`,
+    );
+    if (dependency === undefined) continue;
+    Object.assign(mapping.candidate, {
+      origin: 'dependency' as const,
+      import: {
+        from: dependency.importPath,
+        kind: dependency.exportKind,
+        name: dependency.importName,
+      },
+    });
+  }
   const staleOverrides = mappings.flatMap(mapping =>
     mapping.staleOverride === undefined
       ? []
@@ -275,9 +413,18 @@ export const mapProjectComponents = async (input: {
       .filter(mapping => mapping.status === 'unmapped')
       .map(mapping => mapping.figmaComponentName),
     profile: scan.profile,
-    scannedComponentCount: scan.components.length,
+    scannedComponentCount: scan.components.length + dependencyComponents.length,
+    localComponentCount: scan.components.length,
+    dependencyComponentCount: dependencyComponents.length,
+    dependencyPackages: [
+      ...new Set(dependencyCatalog.components.map(item => item.packageName)),
+    ].toSorted(),
     scanMode: PORTABLE_SCAN_MODE,
-    caveats: [...scan.profile.caveats, ...(input.captureCaveats ?? [])],
+    caveats: [
+      ...scan.profile.caveats,
+      ...dependencyCatalog.caveats,
+      ...(input.captureCaveats ?? []),
+    ],
     ...(staleOverrides.length === 0 ? {} : { staleOverrides }),
     ...(scan.omitted === 0 ? {} : { truncationNote: truncationNote('source files', scan.omitted) }),
   };
@@ -289,27 +436,61 @@ export const mapProjectIcons = async (input: {
   threshold?: number;
   captureCaveats?: readonly string[];
   profile?: PortableProjectProfile;
+  dependencyCatalog?: DependencyCatalog;
 }): Promise<KiwiIconMapResult> => {
   const rootDir = resolve(input.rootDir);
-  const [profile, svgs, packageJson] = await Promise.all([
+  const [profile, svgs, dependencyCatalog] = await Promise.all([
     input.profile ?? analyzePortableProject(rootDir),
     scanRepoSvgs(rootDir),
-    readPackageJson(rootDir),
+    input.dependencyCatalog ?? buildDependencyCatalog(rootDir),
   ]);
-  const mappings = joinIcons(collectFigmaIcons(input.roots), svgs.svgs, {
+  const figmaIcons = collectFigmaIcons(input.roots);
+  const localMappings = joinIcons(figmaIcons, svgs.svgs, {
     threshold: input.threshold ?? DEFAULT_THRESHOLD,
     svg: profile.svg,
     utilityFirst: profile.styling.system === 'tailwind' || profile.styling.system === 'unocss',
   });
+  const mappings = localMappings as KiwiIconMapping[];
+  for (const [index, mapping] of mappings.entries()) {
+    if (mapping.status !== 'unmapped') continue;
+    const usage = figmaIcons[index];
+    if (usage === undefined) continue;
+    const dependency = dependencyIconMatch(usage.name, usage.figmaName, dependencyCatalog.icons);
+    if (dependency !== null) {
+      Object.assign(mapping, {
+        status: 'high',
+        candidate: dependencyIconCandidate(dependency),
+      });
+      continue;
+    }
+    const component = dependencyComponentIconMatch(usage.name, dependencyCatalog);
+    if (component === null) continue;
+    Object.assign(mapping, {
+      status: 'medium',
+      candidate: dependencyComponentIconCandidate(component),
+    });
+  }
+  const mappedDependencyPackages = mappings.flatMap(mapping => {
+    const candidate = mapping.candidate;
+    return candidate !== undefined && 'packageName' in candidate ? [candidate.packageName] : [];
+  });
+  const dependencyPackages = [
+    ...new Set([
+      ...dependencyCatalog.icons.map(icon => icon.packageName),
+      ...mappedDependencyPackages,
+    ]),
+  ].toSorted();
   return {
     mappings,
     unmapped: mappings
       .filter(mapping => mapping.status === 'unmapped')
       .map(mapping => mapping.name),
-    iconLibraries: detectIconLibraries(dependenciesOf(packageJson)),
+    iconLibraries: dependencyPackages,
     profile,
     svgFileCount: svgs.svgs.length,
-    caveats: [...(input.captureCaveats ?? [])],
+    dependencyIconCount: dependencyCatalog.icons.length,
+    dependencyPackages,
+    caveats: [...dependencyCatalog.caveats, ...(input.captureCaveats ?? [])],
     ...(svgs.omitted === 0 ? {} : { truncationNote: truncationNote('.svg files', svgs.omitted) }),
   };
 };

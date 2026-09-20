@@ -14,6 +14,7 @@ import {
   saveVectorAssetPack,
 } from './asset-pack.js';
 import { KiwiCaptureServer, type KiwiCaptureSession } from './capture-server.js';
+import { buildDependencyCatalog } from './dependency-catalog.js';
 import { NormalizedNodeCache, type CachedNodeRead } from './normalized-node-cache.js';
 import { comparePngFiles } from './png-diff.js';
 import {
@@ -619,8 +620,9 @@ export const createKiwiMcpServer = (
     {
       description:
         'Map component instances in the selected Figma subtree to exported components in the local ' +
-        'project. Returns confidence, instance ids, variant axes, explicit map-file overrides and ' +
-        'honest scan caveats so an agent can reuse the UI kit instead of rebuilding it.',
+        'project and installed dependencies discovered from actual imports plus public package metadata. ' +
+        'Returns confidence, import contracts, instance ids, variant axes, explicit map-file overrides ' +
+        'and honest scan caveats so an agent can reuse the UI kit instead of rebuilding it.',
       inputSchema: projectMapInput,
       annotations: READ_ONLY,
     },
@@ -646,9 +648,9 @@ export const createKiwiMcpServer = (
     'icon_map',
     {
       description:
-        'Map named Figma icons in the selected subtree to existing project SVG files. Strict ' +
-        'near-exact matching prevents a visually wrong icon from being reused; unmatched icons ' +
-        'remain explicit export candidates.',
+        'Map named Figma icons in the selected subtree to existing project SVG files, statically ' +
+        'verified dependency registries, or exact dependency component exports. Strict matching ' +
+        'prevents a visually wrong icon from being reused; unmatched icons remain explicit export candidates.',
       inputSchema: projectMapInput,
       annotations: READ_ONLY,
     },
@@ -675,7 +677,7 @@ export const createKiwiMcpServer = (
     {
       description:
         'Map colors observed in the selected Figma subtree to CSS custom properties, SCSS variables, ' +
-        'and statically readable Tailwind or UnoCSS theme tokens in the local project. Browser Kiwi ' +
+        'statically readable Tailwind or UnoCSS theme tokens, and imported dependency styles. Browser Kiwi ' +
         'cannot resolve Figma variable or shared-style names, so every match is explicitly value-only ' +
         'and ambiguous same-value tokens remain unresolved.',
       inputSchema: z.object({
@@ -775,20 +777,23 @@ export const createKiwiMcpServer = (
       }
       const roots = context.nodes.map(node => DesignContextNodeSchema.parse(node));
       const projectProfile = await analyzePortableProject(rootDir);
+      const dependencyCatalog = await buildDependencyCatalog(rootDir);
       const [componentMap, iconMap, tokenMap] = await Promise.all([
         mapProjectComponents({
           roots,
           rootDir,
           ...(threshold === undefined ? {} : { threshold }),
           profile: projectProfile,
+          dependencyCatalog,
         }),
         mapProjectIcons({
           roots,
           rootDir,
           ...(threshold === undefined ? {} : { threshold }),
           profile: projectProfile,
+          dependencyCatalog,
         }),
-        mapProjectTokens({ roots, rootDir, profile: projectProfile }),
+        mapProjectTokens({ roots, rootDir, profile: projectProfile, dependencyCatalog }),
       ]);
       const {
         profile,
@@ -808,10 +813,11 @@ export const createKiwiMcpServer = (
         capabilities: {
           design: context.capabilities,
           grounding: {
-            components: 'portable-export-and-react-prop-match',
-            icons: 'strict-svg-name-match',
-            tokens: 'exact-observed-color-match',
-            componentProps: 'react-static-ast; other-frameworks-unavailable',
+            components: 'project-and-installed-dependency-static-match',
+            icons: 'strict-svg-and-dependency-registry-match',
+            tokens: 'exact-observed-color-match-in-project-and-dependencies',
+            componentProps:
+              'react-static-ast-and-package-declarations; other-frameworks-unavailable',
             figmaVariables: 'unavailable-in-kiwi-capture',
           },
         },

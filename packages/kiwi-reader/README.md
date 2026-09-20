@@ -120,17 +120,30 @@ Expanded descendants receive instance-scoped ids, and recursive or missing compo
 reported in the response capture metadata instead of looping or silently inventing content.
 
 `component_map` joins those grounded Figma component identities to exported components under the
-requested local `rootDir`; `icon_map` performs a stricter near-exact join against existing SVG files
-and reports their color/import contract. The portable Kiwi release statically parses React source
-without executing it and resolves locally declared prop types, destructured props, common wrappers,
+requested local `rootDir` and to installed dependency components discovered from actual imports,
+JSX usage, public package `exports` / `types`, and `.d.ts` declarations. Dependency matches carry a
+ready import contract instead of a `node_modules` path. No package names are built in. An observed
+JSX import wins over an unused same-name export; two actually used same-name imports remain
+ambiguous. The portable Kiwi release performs this static analysis without executing project or
+dependency code and resolves locally declared prop types, destructured props, common wrappers,
 function components and class components. Imported or otherwise unreadable prop contracts remain
 explicitly incomplete, so the join never invents missing-prop TODOs. Vue, Svelte and Angular are
 still indexed by component name only. A verified `docs/figma-component-map.md` row remains the
 authoritative override, while stale file targets are reported instead of returned as usable imports.
 
+`icon_map` first performs its strict near-exact join against existing SVG files, then checks a
+dependency registry only when the project's own JSX establishes the component/prop contract and
+the package's bounded static asset scan establishes the available SVG names. A dependency result
+returns the package, component, prop value, and color contract. Duplicate basenames across registry
+folders remain unmapped unless the Figma name carries enough path information to choose exactly.
+For an icon node this registry contract is more specific than `component_map`'s possible match to a
+generic `Icon` wrapper and should drive code generation.
+
 `token_map` collects colors actually used by the selected subtree (solid fills, strokes, gradient
 stops, shadow colors, and mixed-text runs) and joins them by exact value to CSS custom properties,
-SCSS variables, and statically readable Tailwind or UnoCSS theme tokens under `rootDir`. A unique
+SCSS variables, statically readable Tailwind or UnoCSS theme tokens under `rootDir`, and public
+CSS/SCSS package entrypoints that the project imports. A dependency token carries its package import
+source. A unique
 match is still reported as `medium` with
 `matchedBy: ["value"]`: it is a reuse candidate, not proof that the Figma layer was bound to that
 semantic token. Same-value candidates remain ambiguous, and more than three are counted rather than

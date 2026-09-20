@@ -53,6 +53,117 @@ const projectFixture = async (): Promise<string> => {
   return root;
 };
 
+const installSyntheticDesignSystem = async (root: string): Promise<void> => {
+  const packageRoot = join(root, 'node_modules', '@fixture', 'ui');
+  await Promise.all([
+    mkdir(join(packageRoot, 'dist', 'assets', 'icons'), { recursive: true }),
+    writeFile(
+      join(root, 'src', 'LibraryUsage.tsx'),
+      `
+        import { LibraryButton, Icon } from '@fixture/ui';
+        export const LibraryUsage = () => (
+          <LibraryButton size="small"><Icon name="icons/LibrarySearch" size={20} /></LibraryButton>
+        );
+      `,
+      'utf8',
+    ),
+    writeFile(join(root, 'src', 'library.css'), `@import '@fixture/ui/styles';\n`, 'utf8'),
+  ]);
+  await Promise.all([
+    writeFile(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({
+        name: '@fixture/ui',
+        types: './dist/index.d.ts',
+        exports: {
+          '.': { types: './dist/index.d.ts', import: './dist/index.js' },
+          './styles': { default: './dist/styles.css' },
+        },
+      }),
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'index.d.ts'),
+      `export * from './components.js';\n`,
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'components.d.ts'),
+      `
+        export type LibraryButtonProps = { size?: 'small' | 'large'; variant?: string };
+        export declare function LibraryButton({ size, variant }: LibraryButtonProps): JSX.Element;
+        export type IconProps = { name?: string; size?: number; color?: string };
+        export declare const Icon: ({ name, size, color }: IconProps) => JSX.Element | null;
+      `,
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'index.js'),
+      `
+        const icons = {
+          './assets/icons/LibrarySearch.svg': LibrarySearch,
+          './assets/icons/Close.svg': Close,
+        };
+        export { icons };
+      `,
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'internal-logo.js'),
+      `export const internalLogo = './branding/SecretLogo.svg';\n`,
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'assets', 'icons', 'LibrarySearch.svg.js'),
+      `export default () => <svg><path fill="currentColor" /></svg>;`,
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'assets', 'icons', 'Close.svg.js'),
+      `export default () => <svg><path fill="#123456" /></svg>;`,
+      'utf8',
+    ),
+    writeFile(join(packageRoot, 'dist', 'styles.css'), `@import './tokens.css';\n`, 'utf8'),
+    writeFile(
+      join(packageRoot, 'dist', 'tokens.css'),
+      ':root { --fixture-brand: #2468ac; }\n',
+      'utf8',
+    ),
+  ]);
+};
+
+const installCompetingDesignSystem = async (root: string): Promise<void> => {
+  const packageRoot = join(root, 'node_modules', '@fixture', 'other-ui');
+  await mkdir(join(packageRoot, 'dist'), { recursive: true });
+  await Promise.all([
+    writeFile(
+      join(root, 'src', 'OtherLibraryUsage.tsx'),
+      `import { LibraryGlyph, OtherWidget } from '@fixture/other-ui/components';\nexport const Other = () => <><OtherWidget /><LibraryGlyph /></>;\n`,
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({
+        name: '@fixture/other-ui',
+        exports: {
+          './*': { types: './dist/*.d.ts', import: './dist/*.js' },
+        },
+      }),
+      'utf8',
+    ),
+    writeFile(
+      join(packageRoot, 'dist', 'components.d.ts'),
+      `
+        export declare function LibraryButton(): JSX.Element;
+        export declare function LibraryGlyph(): JSX.Element;
+        export declare function OtherWidget(): JSX.Element;
+      `,
+      'utf8',
+    ),
+    writeFile(join(packageRoot, 'dist', 'components.js'), 'export {};\n', 'utf8'),
+  ]);
+};
+
 afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })));
 });
@@ -194,7 +305,7 @@ describe('portable Kiwi project grounding', () => {
 
     expect(result).toMatchObject({
       unmapped: [],
-      iconLibraries: ['lucide-react'],
+      iconLibraries: [],
       svgFileCount: 1,
       profile: { svg: { mode: 'component', loader: 'vite-plugin-svgr' } },
       mappings: [
@@ -211,6 +322,136 @@ describe('portable Kiwi project grounding', () => {
       ],
     });
     expect(result.mappings[0]?.candidate?.recolor).toContain('text-{token}');
+  });
+
+  it('grounds installed design-system components, icon registries, and CSS tokens generically', async () => {
+    const rootDir = await projectFixture();
+    await installSyntheticDesignSystem(rootDir);
+    await installCompetingDesignSystem(rootDir);
+    const design: DesignContextNode = {
+      id: '7:1',
+      name: 'Library design',
+      type: 'FRAME',
+      children: [
+        {
+          id: '7:2',
+          name: 'Library button instance',
+          type: 'INSTANCE',
+          mainComponent: { id: '8:2', key: 'button', name: 'LibraryButton' },
+          componentProperties: { Size: { type: 'VARIANT', value: 'small' } },
+        },
+        {
+          id: '7:3',
+          name: 'Library search icon',
+          type: 'INSTANCE',
+          mainComponent: { id: '8:3', key: 'search', name: 'Icon / LibrarySearch' },
+        },
+        {
+          id: '7:4',
+          name: 'Brand fill',
+          type: 'RECTANGLE',
+          fills: [
+            {
+              type: 'SOLID',
+              visible: true,
+              opacity: 1,
+              color: { r: 0x24 / 255, g: 0x68 / 255, b: 0xac / 255 },
+            },
+          ],
+        },
+        {
+          id: '7:5',
+          name: 'Library glyph icon',
+          type: 'INSTANCE',
+          mainComponent: { id: '8:5', key: 'glyph', name: 'Icons/LibraryGlyph' },
+        },
+        {
+          id: '7:6',
+          name: 'Internal package asset',
+          type: 'INSTANCE',
+          mainComponent: { id: '8:6', key: 'secret-logo', name: 'Icon / SecretLogo' },
+        },
+      ],
+    };
+
+    const [components, icons, tokens] = await Promise.all([
+      mapProjectComponents({ roots: [design], rootDir }),
+      mapProjectIcons({ roots: [design], rootDir }),
+      mapProjectTokens({ roots: [design], rootDir }),
+    ]);
+
+    expect(components).toMatchObject({
+      dependencyComponentCount: 4,
+      dependencyPackages: ['@fixture/other-ui', '@fixture/ui'],
+    });
+    const buttonMapping = components.mappings.find(
+      mapping => mapping.figmaComponentName === 'LibraryButton',
+    );
+    expect(buttonMapping).toMatchObject({
+      status: 'high',
+      candidate: {
+        name: 'LibraryButton',
+        filePath: '@fixture/ui',
+        matchedProps: ['Size'],
+        origin: 'dependency',
+        import: { from: '@fixture/ui', kind: 'named', name: 'LibraryButton' },
+      },
+    });
+    expect(buttonMapping?.candidate).not.toHaveProperty('ambiguousWith');
+    expect(icons).toMatchObject({
+      dependencyPackages: ['@fixture/other-ui', '@fixture/ui'],
+      mappings: [
+        {
+          name: 'LibrarySearch',
+          status: 'high',
+          candidate: {
+            kind: 'dependency-registry',
+            packageName: '@fixture/ui',
+            import: {
+              from: '@fixture/ui',
+              name: 'Icon',
+              props: { name: 'icons/LibrarySearch' },
+            },
+            colorContract: 'currentColor',
+          },
+        },
+        {
+          name: 'LibraryGlyph',
+          status: 'medium',
+          candidate: {
+            kind: 'dependency-component',
+            packageName: '@fixture/other-ui',
+            import: {
+              from: '@fixture/other-ui/components',
+              kind: 'named',
+              name: 'LibraryGlyph',
+            },
+          },
+        },
+        {
+          name: 'SecretLogo',
+          status: 'unmapped',
+          nodeIds: ['7:6'],
+        },
+      ],
+      unmapped: ['SecretLogo'],
+    });
+    expect(tokens).toMatchObject({
+      dependencyTokenCount: 1,
+      dependencyPackages: ['@fixture/ui/styles'],
+      mappings: [
+        {
+          figmaValue: '#2468AC',
+          status: 'medium',
+          candidate: {
+            token: 'fixture-brand',
+            ref: 'var(--fixture-brand)',
+            from: '@fixture/ui/styles',
+          },
+        },
+      ],
+    });
+    expect(components.caveats.join(' ')).toContain('never executed');
   });
 
   it('maps observed colors to portable CSS and SCSS tokens without claiming Figma bindings', async () => {

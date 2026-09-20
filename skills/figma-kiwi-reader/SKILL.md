@@ -53,7 +53,12 @@ unless current evidence requires a change; when that happens, update the plan wi
   for focused retries. Reuse high-confidence component/icon matches and verify medium matches. Treat
   every Kiwi token candidate marked `matchedBy: ['value']` as name-blind reuse evidence, not a proven
   Figma binding. Only infer missing component props from a contract marked complete; incomplete
-  React contracts and name-only Vue, Svelte or Angular scans prove no missing props.
+  React contracts and name-only Vue, Svelte or Angular scans prove no missing props. Dependency
+  candidates are discovered generically from the project's imports plus public package metadata,
+  declarations, styles and icon registries; use the returned import contract and do not substitute a
+  library based only on familiarity with its name. For a named icon, prefer `icon_map`'s registry
+  contract over a generic `component_map` match to the library's `Icon` wrapper because only the icon
+  result carries the required name/prop value.
 - After changes to `mcp` or `shared`, build before live testing because the server runs `dist`.
 - When changing scenegraph caching, preserve dependencies outside the requested subtree: parent layout
   context, component masters, component sets, and both ancestor chains of a reparented node.
