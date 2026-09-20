@@ -7,7 +7,14 @@ const standaloneDependencies =
   /^(?:@figwright\/shared|@modelcontextprotocol\/(?:server|core)|fdir|fzstd|ignore|kiwi-schema|ws|zod)(?:\/.*)?$/;
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/live-probe.ts', 'src/mcp.ts', 'src/hub.ts', 'src/serve.ts'],
+  entry: [
+    'src/index.ts',
+    'src/live-probe.ts',
+    'src/mcp.ts',
+    'src/hub.ts',
+    'src/stdio-proxy.ts',
+    'src/serve.ts',
+  ],
   outDir: 'dist',
   format: 'esm',
   target: 'node24',

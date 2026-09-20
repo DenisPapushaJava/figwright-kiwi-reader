@@ -194,7 +194,13 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       );
 
       const listed = await send('tools/list');
-      const result = listed.result as { tools: Array<{ name: string }> };
+      const result = listed.result as {
+        tools: Array<{
+          name: string;
+          description?: string;
+          inputSchema?: { required?: string[] };
+        }>;
+      };
       expect(result.tools.map(tool => tool.name)).toEqual([
         'browser_status',
         'list_files',
@@ -207,10 +213,15 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         'component_map',
         'icon_map',
         'token_map',
+        'get_implementation_context',
         'save_assets',
         'capture_reference',
         'compare_screenshots',
       ]);
+      expect(result.tools.find(tool => tool.name === 'get_implementation_context')).toMatchObject({
+        description: expect.stringContaining('client-independent implementation payload'),
+        inputSchema: { required: expect.arrayContaining(['rootDir']) },
+      });
 
       const status = await send('tools/call', { name: 'browser_status', arguments: {} });
       expect(status).not.toHaveProperty('error');
@@ -372,6 +383,61 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         variableBindings: 'unavailable',
       });
 
+      const implementationContext = parseToolText(
+        await send('tools/call', {
+          name: 'get_implementation_context',
+          arguments: { nodeId: '6:140', rootDir: assetDirectory },
+        }),
+      );
+      expect(implementationContext).toMatchObject({
+        schemaVersion: 'figwright-kiwi-implementation@1',
+        capabilities: {
+          design: { componentInstances: 'resolved' },
+          grounding: {
+            components: 'portable-export-name-match',
+            icons: 'strict-svg-name-match',
+            tokens: 'exact-observed-color-match',
+          },
+        },
+        design: {
+          nodes: [{ id: '6:140', children: [{ id: '6:141' }, { id: '6:142' }] }],
+          capture: { provider: 'kiwi-browser', fileKey: 'file' },
+        },
+        project: {
+          profile: { framework: 'react' },
+          scanModes: {
+            components: 'portable-name-only',
+            tokens: 'portable-css-scss',
+          },
+        },
+        grounding: {
+          components: {
+            mappings: [{ figmaComponentName: 'Button', status: 'high' }],
+          },
+          icons: { mappings: [], svgFileCount: 1 },
+          tokens: { mappings: [], projectTokenCount: 1 },
+        },
+      });
+      expect(JSON.stringify(implementationContext).length).toBeLessThan(1_500_000);
+
+      const truncatedImplementationContext = parseToolText(
+        await send('tools/call', {
+          name: 'get_implementation_context',
+          arguments: { nodeId: '6:140', depth: 0, rootDir: assetDirectory },
+        }),
+      );
+      expect(truncatedImplementationContext).toMatchObject({
+        schemaVersion: 'figwright-kiwi-implementation@1',
+        designSchemaVersion: 'figwright-kiwi-context@1',
+        nodes: [{ id: '6:140' }],
+        sectionPlan: {
+          reason: 'captured subtree truncated after 1 nodes',
+          totalNodes: 3,
+          sections: [{ nodeId: '6:141' }, { nodeId: '6:142' }],
+        },
+        note: expect.stringContaining('get_implementation_context'),
+      });
+
       const saved = parseToolText(
         await send('tools/call', {
           name: 'save_assets',
@@ -485,6 +551,19 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(JSON.stringify(sectioned).length).toBeLessThan(1_500_000);
       expect(sectioned).toMatchObject({
         sectionPlan: { sectionsTruncated: true, omittedSections: 1_799 },
+      });
+
+      const implementationPlanResponse = await send('tools/call', {
+        name: 'get_implementation_context',
+        arguments: { nodeId: '6:140', depth: 2, rootDir: assetDirectory },
+      });
+      const implementationPlan = parseToolText(implementationPlanResponse);
+      expect(JSON.stringify(implementationPlan).length).toBeLessThan(1_500_000);
+      expect(implementationPlan).toMatchObject({
+        schemaVersion: 'figwright-kiwi-implementation@1',
+        designSchemaVersion: 'figwright-kiwi-context@1',
+        sectionPlan: { sectionsTruncated: true, omittedSections: 1_799 },
+        note: expect.stringContaining('get_implementation_context'),
       });
     } finally {
       extensionSocket?.close();
@@ -621,6 +700,7 @@ describe.skipIf(!existsSync(HUB_ENTRY))('Kiwi shared MCP hub (built dist)', () =
           'component_map',
           'icon_map',
           'token_map',
+          'get_implementation_context',
         ]),
       );
       expect(listedResult.tools.find(tool => tool.name === 'get_selection')).toMatchObject({

@@ -124,8 +124,10 @@ URL, search its tree, and receive a bounded design context with no Figma plugin 
 ### Phase 3B: shared local multi-client hub
 
 Status: the transport foundation is implemented. `hub.mjs` owns one Kiwi capture socket and exposes
-the read tools at `http://127.0.0.1:9225/mcp`; the existing stdio entry remains compatible. Release
-installation, background lifecycle and client-specific setup helpers are still open.
+the read tools at `http://127.0.0.1:9225/mcp`; the existing stdio entry remains compatible. The Codex
+release uses a lightweight stdio-to-hub adapter, and the Windows installer starts, health-checks, and
+safely replaces its own hub during updates. Persistent pre-login startup, clean uninstall, and setup
+helpers for clients other than Codex remain open.
 
 - Run exactly one long-lived capture owner per Windows user. Codex, Cursor, Claude and other MCP
   clients connect to that process instead of each trying to bind port 9224.
@@ -358,21 +360,24 @@ renderer/font antialiasing differences from structural, typography and missing-a
 ## Phase 6: tokens, components and codegen integration
 
 Status: component, icon, and observed-color token grounding are available through the isolated Kiwi
-MCP. They reuse existing pure Figwright scanners against a portable, gitignore-aware project index.
+MCP. `get_implementation_context` combines the full design tree, asset inventory, project profile,
+and all three grounding dimensions in one client-independent, bounded response; large results return
+a section plan that preserves the same `rootDir` workflow across Codex and other MCP clients. The
+grounders reuse existing pure Figwright scanners against a portable, gitignore-aware project index.
 The standalone bundle confirms component exports and names but deliberately leaves prop coverage
 unknown instead of shipping the native AST parser; explicit component-map overrides still work and
 stale targets are reported. `token_map` scans CSS custom properties and SCSS variables, then reports
 exact color-value matches as medium-confidence, name-blind candidates. Stable shared-style ids are
-surfaced as opaque references. Figma variable/style-name resolution, JS/TS token configs, the codegen
-skill handoff and live UI-kit parity remain open.
+surfaced as opaque references. Figma variable/style-name resolution, JS/TS token configs, and broader
+live UI-kit parity remain open.
 
 - Resolve shared style references to stable names and values when wire evidence becomes available;
   until then preserve their ids and keep value-only project matches explicitly provisional.
 - Build variable collections/modes only when the wire data proves them; do not invent REST-only
   metadata.
 - Normalize component sets, variants, booleans, text props and instance swaps.
-- Feed the resulting design context into existing `component_map`, `token_map`, `icon_map`, and the
-  `figma-codegen` skill where their required contracts are satisfied.
+- Keep the Codex skill and MCP server instructions centered on `get_implementation_context`; retain
+  the individual maps for focused retries and clients that prefer separate calls.
 - Mark unavailable grounding dimensions in one leading capabilities/caveats block.
 
 Exit criteria: an agent can implement one real 1920x1080 screen using the browser reader, reuse code

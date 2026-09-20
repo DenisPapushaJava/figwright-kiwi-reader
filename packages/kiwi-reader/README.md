@@ -38,9 +38,17 @@ node .\packages\kiwi-reader\dist\mcp.mjs
 
 Configure an MCP client to launch that command from the repository root. It advertises
 `browser_status`, `list_files`, `use_file`, `get_selection`, `get_node`, `get_design_context`,
-`analyze_project`, `scan_components`, `component_map`, `icon_map`, `token_map`, `save_assets`,
-`capture_reference`, and `compare_screenshots`. `get_design_context` accepts a pasted Figma URL
-directly; when `nodeId` is omitted it uses the selected node from the attached tab's URL.
+`analyze_project`, `scan_components`, `component_map`, `icon_map`, `token_map`,
+`get_implementation_context`, `save_assets`, `capture_reference`, and `compare_screenshots`.
+`get_design_context` accepts a pasted Figma URL directly; when `nodeId` is omitted it uses the
+selected node from the attached tab's URL.
+
+For code generation, prefer one `get_implementation_context` call with the codebase's absolute
+`rootDir`. It returns full design context, asset inventory, project profile, component/icon reuse,
+and observed-color token candidates under one response budget. If the captured tree is truncated or
+the combined payload is too large, it returns a `sectionPlan`; call the same tool for each section
+with the same `rootDir`. The separate mapping tools remain available for focused inspection and
+retries.
 
 ## Shared MCP hub
 
@@ -56,11 +64,18 @@ Connect Streamable HTTP clients to `http://127.0.0.1:9225/mcp` and send the toke
 `Authorization: Bearer <token>`. The health endpoint is `http://127.0.0.1:9225/health`. Both ports
 are configurable through `FIGWRIGHT_KIWI_PORT` and `FIGWRIGHT_KIWI_HUB_PORT`.
 
+The packaged Codex plugin launches `stdio-proxy.mjs`. The proxy starts the shared hub when needed,
+then forwards stdio JSON-RPC to the hub, so several Codex tasks share one capture owner. The Windows
+installer also starts the hub immediately, verifies `/health`, and safely replaces its own previous
+hub process during updates. `mcp.mjs` remains available as a direct single-client compatibility
+entry point.
+
 The hub has no shared active-file switch. After `list_files`, pass `fileKey` or `tabId` to
 `get_selection`, `get_node`, `get_design_context`, `save_assets`, or `capture_reference` whenever
 more than one captured tab is available. The same explicit target fields apply to `component_map`,
-`icon_map`, and `token_map`. This keeps concurrent clients isolated. If no hub token is set, the
-endpoint remains loopback-only and prints a security warning; a token is recommended for normal use.
+`icon_map`, `token_map`, and `get_implementation_context`. This keeps concurrent clients isolated. If
+no hub token is set, the endpoint remains loopback-only and prints a security warning; a token is
+recommended for normal use.
 
 Normalized results use Figwright's existing `SerializedNode` contract. They retain geometry,
 paints, effects, text and auto-layout fields already confirmed on live Kiwi traffic while dropping

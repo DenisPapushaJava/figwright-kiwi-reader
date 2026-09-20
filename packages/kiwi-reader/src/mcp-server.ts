@@ -32,6 +32,7 @@ const MAX_RESPONSE_CHARS = 1_500_000;
 const MAX_SECTION_PLAN_SECTIONS = 200;
 const MAX_SECTION_NAME_CHARS = 500;
 const MAX_ASSET_INVENTORY_ENTRIES = 1_000;
+const IMPLEMENTATION_CONTEXT_SCHEMA_VERSION = 'figwright-kiwi-implementation@1';
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false } as const;
 const LOCAL_WRITE = { readOnlyHint: false, destructiveHint: false } as const;
 
@@ -252,6 +253,65 @@ const designAssets = (root: CapturedNode, session: KiwiCaptureSession) => {
   };
 };
 
+const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel) => {
+  const projected = projectNode(normalizeCapturedNode(result.captured), detail);
+  const assets = designAssets(result.captured, result.session);
+  return {
+    schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
+    nodes: [projected],
+    capture: {
+      provider: 'kiwi-browser',
+      fileKey: result.session.fileKey,
+      tabId: result.session.tabId,
+      visited: result.stats.visited,
+      truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
+      instanceResolution: {
+        resolved: result.stats.resolvedInstances,
+        unresolved: result.stats.unresolvedInstances,
+        cycles: result.stats.instanceCycles,
+      },
+    },
+    capabilities: {
+      structuredProperties: 'captured-when-present',
+      componentInstances:
+        result.stats.unresolvedInstances === 0 ? 'resolved' : 'partially-resolved',
+      componentProperties: 'variants-and-boolean-visibility',
+      instanceSwaps: 'resolved-from-symbol-overrides',
+      vectorAssets:
+        assets.summary.vectors === 0
+          ? 'not-present'
+          : assets.summary.vectors === assets.summary.exportableVectors
+            ? 'exportable'
+            : 'partially-exportable',
+      rasterImages: !result.session.captureImages
+        ? 'disabled-by-user'
+        : assets.summary.images === 0
+          ? 'not-present'
+          : assets.summary.availableImages === assets.summary.images
+            ? 'exportable'
+            : 'partially-exportable',
+      mixedTextRuns: 'style-overrides',
+      variables: 'unsupported',
+      visualReference: 'not-captured',
+    },
+    assets,
+    caveats: [
+      'Variables and mixed-text links, lists, and per-run bindings are not resolved yet.',
+      'When Kiwi exposes an instance swap only as an overridden symbol id, the swapped component tree is resolved but its component-property definition name is unavailable.',
+      ...rasterAssetCaveats(assets.summary, result.session.captureImages),
+      ...(result.stats.unresolvedInstances === 0
+        ? []
+        : [
+            `${result.stats.unresolvedInstances} component instance(s) could not be expanded because the captured graph did not contain a usable master component.`,
+          ]),
+    ],
+  };
+};
+
+const uniqueStrings = (...groups: readonly (readonly string[])[]): string[] => [
+  ...new Set(groups.flat()),
+];
+
 export const createKiwiMcpServer = (
   capture: KiwiCaptureServer,
   options: KiwiMcpServerOptions = {},
@@ -262,7 +322,7 @@ export const createKiwiMcpServer = (
     { name: 'figwright-kiwi-reader', version: '0.1.0' },
     {
       instructions:
-        'Read-only Figma browser capture. Use get_design_context for code generation. No Figma writes are available.',
+        'Read-only Figma browser capture. For implementation in an existing codebase, call get_implementation_context once with that project rootDir; it returns the full design tree plus component, icon, and token grounding. Use get_design_context for design-only inspection. Follow sectionPlan for large selections. No Figma writes are available.',
     },
   );
 
@@ -423,58 +483,7 @@ export const createKiwiMcpServer = (
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
-      const projected = projectNode(normalizeCapturedNode(result.captured), detail ?? 'full');
-      const assets = designAssets(result.captured, result.session);
-      const output = {
-        schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
-        nodes: [projected],
-        capture: {
-          provider: 'kiwi-browser',
-          fileKey: result.session.fileKey,
-          tabId: result.session.tabId,
-          visited: result.stats.visited,
-          truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
-          instanceResolution: {
-            resolved: result.stats.resolvedInstances,
-            unresolved: result.stats.unresolvedInstances,
-            cycles: result.stats.instanceCycles,
-          },
-        },
-        capabilities: {
-          structuredProperties: 'captured-when-present',
-          componentInstances:
-            result.stats.unresolvedInstances === 0 ? 'resolved' : 'partially-resolved',
-          componentProperties: 'variants-and-boolean-visibility',
-          instanceSwaps: 'resolved-from-symbol-overrides',
-          vectorAssets:
-            assets.summary.vectors === 0
-              ? 'not-present'
-              : assets.summary.vectors === assets.summary.exportableVectors
-                ? 'exportable'
-                : 'partially-exportable',
-          rasterImages: !result.session.captureImages
-            ? 'disabled-by-user'
-            : assets.summary.images === 0
-              ? 'not-present'
-              : assets.summary.availableImages === assets.summary.images
-                ? 'exportable'
-                : 'partially-exportable',
-          mixedTextRuns: 'style-overrides',
-          variables: 'unsupported',
-          visualReference: 'not-captured',
-        },
-        assets,
-        caveats: [
-          'Variables and mixed-text links, lists, and per-run bindings are not resolved yet.',
-          'When Kiwi exposes an instance swap only as an overridden symbol id, the swapped component tree is resolved but its component-property definition name is unavailable.',
-          ...rasterAssetCaveats(assets.summary, result.session.captureImages),
-          ...(result.stats.unresolvedInstances === 0
-            ? []
-            : [
-                `${result.stats.unresolvedInstances} component instance(s) could not be expanded because the captured graph did not contain a usable master component.`,
-              ]),
-        ],
-      };
+      const output = designContext(result, detail ?? 'full');
       const chars = JSON.stringify(output).length;
       if (chars > MAX_RESPONSE_CHARS) {
         return textResult(
@@ -622,6 +631,123 @@ export const createKiwiMcpServer = (
           captureCaveats: grounded.caveats,
         }),
       );
+    },
+  );
+
+  server.registerTool(
+    'get_implementation_context',
+    {
+      description:
+        'Prepare one bounded, client-independent implementation payload for the selected Figma subtree. ' +
+        'It combines full design context, asset inventory, project profile, component reuse, icon reuse, ' +
+        'and observed-color token candidates. Pass the codebase rootDir; follow sectionPlan when returned.',
+      inputSchema: projectMapInput.extend({ rootDir: z.string().min(1) }),
+      annotations: READ_ONLY,
+    },
+    async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
+      const result = pickNode(capture, routing, nodeId, {
+        ...(depth === undefined ? {} : { depth }),
+        ...(tabId === undefined ? {} : { tabId }),
+        ...(fileKey === undefined ? {} : { fileKey }),
+      });
+      const context = designContext(result, 'full');
+      const roots = context.nodes.map(node => DesignContextNodeSchema.parse(node));
+      const captureCaveats = context.capture.truncated
+        ? [
+            `The captured subtree was truncated after ${result.stats.visited} nodes; project grounding may omit descendants outside the captured slice.`,
+          ]
+        : [];
+      const [componentMap, iconMap, tokenMap] = await Promise.all([
+        mapProjectComponents({
+          roots,
+          rootDir,
+          ...(threshold === undefined ? {} : { threshold }),
+          captureCaveats,
+        }),
+        mapProjectIcons({
+          roots,
+          rootDir,
+          ...(threshold === undefined ? {} : { threshold }),
+          captureCaveats,
+        }),
+        mapProjectTokens({ roots, rootDir, captureCaveats }),
+      ]);
+      const {
+        profile,
+        caveats: componentCaveats,
+        scanMode: componentScanMode,
+        ...components
+      } = componentMap;
+      const { profile: _iconProfile, caveats: iconCaveats, ...icons } = iconMap;
+      const {
+        profile: _tokenProfile,
+        caveats: tokenCaveats,
+        scanMode: tokenScanMode,
+        ...tokens
+      } = tokenMap;
+      const output = {
+        schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
+        capabilities: {
+          design: context.capabilities,
+          grounding: {
+            components: 'portable-export-name-match',
+            icons: 'strict-svg-name-match',
+            tokens: 'exact-observed-color-match',
+            componentProps: 'unavailable-in-portable-scan',
+            figmaVariables: 'unavailable-in-kiwi-capture',
+          },
+        },
+        caveats: uniqueStrings(context.caveats, componentCaveats, iconCaveats, tokenCaveats),
+        design: {
+          schemaVersion: context.schemaVersion,
+          nodes: context.nodes,
+          capture: context.capture,
+          assets: context.assets,
+        },
+        project: {
+          profile,
+          scanModes: {
+            components: componentScanMode,
+            tokens: tokenScanMode,
+          },
+        },
+        grounding: { components, icons, tokens },
+      };
+      const chars = JSON.stringify(output).length;
+      if (context.capture.truncated || chars > MAX_RESPONSE_CHARS) {
+        const planRoot =
+          result.captured.children.length > 0
+            ? result.captured
+            : (result.session.graph.find(result.selectedNodeId, 1, MAX_SECTION_PLAN_SECTIONS + 1) ??
+              result.captured);
+        const reason = context.capture.truncated
+          ? `captured subtree truncated after ${result.stats.visited} nodes`
+          : `implementation payload ${chars} chars exceeds ${MAX_RESPONSE_CHARS}`;
+        const plan = sectionPlan(planRoot, reason);
+        return textResult({
+          schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
+          designSchemaVersion: plan.schemaVersion,
+          nodes: plan.nodes,
+          sectionPlan: plan.sectionPlan,
+          capabilities: output.capabilities,
+          caveats: output.caveats,
+          project: output.project,
+          groundingSummary: {
+            components: {
+              total: components.mappings.length,
+              unmapped: components.unmapped.length,
+            },
+            icons: { total: icons.mappings.length, unmapped: icons.unmapped.length },
+            tokens: {
+              total: tokens.mappings.length,
+              ambiguous: tokens.ambiguous.length,
+              unmapped: tokens.unmapped.length,
+            },
+          },
+          note: 'Request each section nodeId with get_implementation_context using the same rootDir.',
+        });
+      }
+      return textResult(output);
     },
   );
 
