@@ -674,9 +674,10 @@ export const createKiwiMcpServer = (
     'token_map',
     {
       description:
-        'Map colors observed in the selected Figma subtree to CSS custom properties and SCSS variables ' +
-        'in the local project. Browser Kiwi cannot resolve Figma variable or shared-style names, so ' +
-        'every match is explicitly value-only and ambiguous same-value tokens remain unresolved.',
+        'Map colors observed in the selected Figma subtree to CSS custom properties, SCSS variables, ' +
+        'and statically readable Tailwind or UnoCSS theme tokens in the local project. Browser Kiwi ' +
+        'cannot resolve Figma variable or shared-style names, so every match is explicitly value-only ' +
+        'and ambiguous same-value tokens remain unresolved.',
       inputSchema: z.object({
         nodeId: z.string().optional(),
         depth: z.number().int().min(0).max(32).optional(),

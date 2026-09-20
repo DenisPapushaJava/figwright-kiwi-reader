@@ -290,7 +290,7 @@ describe('portable Kiwi project grounding', () => {
     const result = await mapProjectTokens({ roots: [design], rootDir });
 
     expect(result).toMatchObject({
-      scanMode: 'portable-css-scss',
+      scanMode: 'portable-css-scss-js-config',
       variableBindings: 'unavailable',
       unresolvedStyleRefs: [
         { id: 'S:effect', slots: ['effect'], nodeIds: ['4:1'] },
@@ -344,5 +344,112 @@ describe('portable Kiwi project grounding', () => {
     ).toBeUndefined();
     expect(result.unmapped).toContain('#ABCDEF');
     expect(result.caveats.join(' ')).toContain('value equality only');
+  });
+
+  it('maps Tailwind config colors with the shared static parser and reports runtime values', async () => {
+    const rootDir = await projectFixture();
+    await Promise.all([
+      writeFile(
+        join(rootDir, 'package.json'),
+        JSON.stringify({
+          dependencies: { react: '^19.0.0' },
+          devDependencies: { tailwindcss: '^3.4.0', typescript: '^6.0.0' },
+        }),
+        'utf8',
+      ),
+      writeFile(
+        join(rootDir, 'tailwind.config.ts'),
+        `export default { theme: { extend: { colors: { brand: '#123456', runtime: makeColor() } } } };\n`,
+        'utf8',
+      ),
+      writeFile(join(rootDir, 'src', 'tokens.css'), '@theme { --color-brand: #123456; }\n', 'utf8'),
+    ]);
+    const design: DesignContextNode = {
+      id: '5:1',
+      name: 'Brand surface',
+      type: 'RECTANGLE',
+      fills: [
+        {
+          type: 'SOLID',
+          visible: true,
+          opacity: 1,
+          color: { r: 0x12 / 255, g: 0x34 / 255, b: 0x56 / 255 },
+        },
+      ],
+    };
+
+    const result = await mapProjectTokens({ roots: [design], rootDir });
+
+    expect(result.profile.styling).toMatchObject({
+      system: 'tailwind',
+      configPath: 'tailwind.config.ts',
+      tailwindVersion: 3,
+    });
+    expect(result.tokenFiles).toEqual(['src/tokens.css', 'tailwind.config.ts']);
+    expect(result.projectTokenCount).toBe(1);
+    expect(result.mappings).toContainEqual(
+      expect.objectContaining({
+        figmaValue: '#123456',
+        status: 'medium',
+        candidate: expect.objectContaining({
+          token: 'color-brand',
+          ref: 'brand',
+          utility: 'brand',
+        }),
+      }),
+    );
+    expect(result.caveats.join(' ')).toContain('never executed');
+    expect(result.caveats.join(' ')).toContain('1 theme entr(ies)');
+  });
+
+  it('detects UnoCSS mts configs and keeps CSS and SCSS tokens alongside config tokens', async () => {
+    const rootDir = await projectFixture();
+    await Promise.all([
+      writeFile(
+        join(rootDir, 'package.json'),
+        JSON.stringify({ dependencies: { vue: '^3.0.0' }, devDependencies: { unocss: '^66.0.0' } }),
+        'utf8',
+      ),
+      writeFile(
+        join(rootDir, 'uno.config.mts'),
+        `import { defineConfig, presetUno } from 'unocss';\nexport default defineConfig({ presets: [presetUno()], theme: { colors: { accent: '#abcdef' } } });\n`,
+        'utf8',
+      ),
+      writeFile(join(rootDir, 'src', 'tokens.css'), ':root { --surface: #123456; }\n', 'utf8'),
+      writeFile(join(rootDir, 'src', '_tokens.scss'), '$shadow: #00000066;\n', 'utf8'),
+    ]);
+    const design: DesignContextNode = {
+      id: '6:1',
+      name: 'Accent surface',
+      type: 'RECTANGLE',
+      fills: [
+        {
+          type: 'SOLID',
+          visible: true,
+          opacity: 1,
+          color: { r: 0xab / 255, g: 0xcd / 255, b: 0xef / 255 },
+        },
+      ],
+    };
+
+    const result = await mapProjectTokens({ roots: [design], rootDir });
+
+    expect(result.profile.styling).toMatchObject({
+      system: 'unocss',
+      configPath: 'uno.config.mts',
+    });
+    expect(result.tokenFiles).toEqual(['src/_tokens.scss', 'src/tokens.css', 'uno.config.mts']);
+    expect(result.projectTokenCount).toBe(3);
+    expect(result.mappings).toContainEqual(
+      expect.objectContaining({
+        figmaValue: '#ABCDEF',
+        status: 'medium',
+        candidate: expect.objectContaining({
+          token: 'color-accent',
+          ref: 'accent',
+          utility: 'accent',
+        }),
+      }),
+    );
   });
 });

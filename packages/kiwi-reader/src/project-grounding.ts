@@ -11,7 +11,7 @@ import {
   parseMapFile,
 } from '../../mcp/src/join/component-map.js';
 import { collectFigmaIcons, type IconMapping, joinIcons } from '../../mcp/src/join/icon-map.js';
-import type { ProjectProfile } from '../../mcp/src/profile/profile.js';
+import { analyzeProject, type ProjectProfile } from '../../mcp/src/profile/profile.js';
 import { truncationNote, walkRepoFiles } from '../../mcp/src/repo-walk.js';
 import type { ComponentFramework, ScannedComponent } from '../../mcp/src/scan/scan.js';
 
@@ -22,8 +22,6 @@ const PORTABLE_SCAN_MODE = 'portable-name-only' as const;
 const PORTABLE_SCAN_CAVEAT =
   'The standalone Kiwi bundle verifies component exports and names without a native AST parser. ' +
   'Prop coverage is intentionally unknown, so unmatchedProps is never inferred from this scan.';
-
-type Framework = ProjectProfile['framework'];
 
 interface PackageJson {
   dependencies?: Record<string, string>;
@@ -62,57 +60,6 @@ export interface KiwiIconMapResult {
   truncationNote?: string;
 }
 
-const COMPONENT_EXTENSIONS: Record<Framework, string[]> = {
-  next: ['.tsx', '.jsx'],
-  nuxt: ['.vue'],
-  react: ['.tsx', '.jsx'],
-  vue: ['.vue'],
-  svelte: ['.svelte'],
-  solid: ['.tsx', '.jsx'],
-  angular: ['.ts'],
-  unknown: ['.tsx', '.jsx', '.vue', '.svelte'],
-};
-
-const SVG_LOADERS: Array<{ dep: string; loader: string; hint: string }> = [
-  {
-    dep: 'vite-plugin-svgr',
-    loader: 'vite-plugin-svgr',
-    hint: "import Icon from './icon.svg?react'",
-  },
-  {
-    dep: 'vite-svg-loader',
-    loader: 'vite-svg-loader',
-    hint: "import Icon from './icon.svg?component'",
-  },
-  {
-    dep: 'vite-plugin-solid-svg',
-    loader: 'vite-plugin-solid-svg',
-    hint: "import Icon from './icon.svg?component-solid'",
-  },
-  {
-    dep: '@svgr/webpack',
-    loader: '@svgr/webpack',
-    hint: "import { ReactComponent as Icon } from './icon.svg'",
-  },
-  { dep: '@svgr/rollup', loader: '@svgr/rollup', hint: "import Icon from './icon.svg'" },
-  {
-    dep: 'unplugin-icons',
-    loader: 'unplugin-icons',
-    hint: "import Icon from '~icons/{collection}/{name}' (local svg via FileSystemIconLoader)",
-  },
-  {
-    dep: 'nuxt-svgo',
-    loader: 'nuxt-svgo',
-    hint: "import Icon from './icon.svg?component' (or <NuxtIcon>)",
-  },
-  {
-    dep: 'nuxt-svgo-loader',
-    loader: 'nuxt-svgo-loader',
-    hint: "import Icon from './icon.svg?component' (or a <SvgoIcon name> macro)",
-  },
-  { dep: '@nuxtjs/svg', loader: '@nuxtjs/svg', hint: "import Icon from './icon.svg?component'" },
-];
-
 const fileExists = async (path: string): Promise<boolean> =>
   access(path).then(
     () => true,
@@ -132,95 +79,10 @@ const dependenciesOf = (value: PackageJson | null): Record<string, string> => ({
   ...value?.devDependencies,
 });
 
-const detectFramework = (deps: Record<string, string>): Framework => {
-  if ('next' in deps) return 'next';
-  if ('nuxt' in deps) return 'nuxt';
-  if ('react' in deps) return 'react';
-  if ('vue' in deps) return 'vue';
-  if ('svelte' in deps) return 'svelte';
-  if ('solid-js' in deps) return 'solid';
-  if ('@angular/core' in deps) return 'angular';
-  return 'unknown';
-};
-
-const majorVersion = (range: string | undefined): number | undefined => {
-  const match = range?.match(/\d+/);
-  return match === undefined || match === null ? undefined : Number(match[0]);
-};
-
-const detectStyling = async (
-  rootDir: string,
-  deps: Record<string, string>,
-): Promise<ProjectProfile['styling']> => {
-  const tailwindConfigs = [
-    'tailwind.config.js',
-    'tailwind.config.cjs',
-    'tailwind.config.mjs',
-    'tailwind.config.ts',
-  ];
-  const tailwindConfigPresence = await Promise.all(
-    tailwindConfigs.map(configPath => fileExists(join(rootDir, configPath))),
-  );
-  const tailwindConfig = tailwindConfigs.find((_, index) => tailwindConfigPresence[index] === true);
-  if (tailwindConfig !== undefined) {
-    return {
-      system: 'tailwind',
-      configPath: tailwindConfig,
-      tailwindVersion: majorVersion(deps.tailwindcss) ?? 3,
-    };
-  }
-  if ('tailwindcss' in deps || '@tailwindcss/vite' in deps || '@tailwindcss/postcss' in deps) {
-    return { system: 'tailwind', tailwindVersion: majorVersion(deps.tailwindcss) ?? 4 };
-  }
-  if (Object.keys(deps).some(name => name === 'unocss' || name.startsWith('@unocss/'))) {
-    return { system: 'unocss' };
-  }
-  if (['sass', 'sass-embedded', 'node-sass'].some(name => name in deps)) {
-    return { system: 'scss' };
-  }
-  const cssWalk = await walkRepoFiles(rootDir, { extensions: ['.css'], cap: 200 });
-  for (const path of cssWalk.files) {
-    try {
-      // eslint-disable-next-line no-await-in-loop -- bounded deterministic scan; first signal wins
-      const body = await readFile(join(rootDir, path), 'utf8');
-      if (/\.module\.css$/i.test(path)) return { system: 'css-modules' };
-      if (/--[\w-]+\s*:/.test(body)) return { system: 'css-variables' };
-    } catch {
-      // Ignore a file that disappeared during the scan.
-    }
-  }
-  return { system: cssWalk.files.length > 0 ? 'plain-css' : 'unknown' };
-};
-
-const detectSvg = (deps: Record<string, string>): ProjectProfile['svg'] => {
-  const match = SVG_LOADERS.find(item => item.dep in deps);
-  return match === undefined
-    ? { mode: 'url' }
-    : { mode: 'component', loader: match.loader, importHint: match.hint };
-};
-
 export const analyzePortableProject = async (rootDir: string): Promise<PortableProjectProfile> => {
-  const root = resolve(rootDir);
-  const packageJson = await readPackageJson(root);
-  const deps = dependenciesOf(packageJson);
-  const framework = detectFramework(deps);
-  const language =
-    (await fileExists(join(root, 'tsconfig.json'))) || 'typescript' in deps ? 'ts' : 'js';
-  const styling = await detectStyling(root, deps);
-  const svg = detectSvg(deps);
+  const profile = await analyzeProject(rootDir);
   return {
-    rootDir: root,
-    framework,
-    language,
-    styling,
-    svg,
-    componentExtensions: COMPONENT_EXTENSIONS[framework],
-    evidence: [
-      `framework=${framework}: dependency manifest`,
-      `language=${language}: ${language === 'ts' ? 'TypeScript signal present' : 'no TypeScript signal'}`,
-      `styling=${styling.system}: portable manifest/config scan`,
-      `svg=${svg.mode}${svg.loader === undefined ? '' : ` (${svg.loader})`}: dependency manifest`,
-    ],
+    ...profile,
     scanMode: PORTABLE_SCAN_MODE,
     caveats: [PORTABLE_SCAN_CAVEAT],
   };

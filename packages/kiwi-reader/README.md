@@ -123,13 +123,15 @@ therefore marks prop extraction as unknown and never invents missing-prop TODOs.
 reported instead of returned as usable imports.
 
 `token_map` collects colors actually used by the selected subtree (solid fills, strokes, gradient
-stops, shadow colors, and mixed-text runs) and joins them by exact value to CSS custom properties and
-SCSS variables under `rootDir`. A unique match is still reported as `medium` with
+stops, shadow colors, and mixed-text runs) and joins them by exact value to CSS custom properties,
+SCSS variables, and statically readable Tailwind or UnoCSS theme tokens under `rootDir`. A unique
+match is still reported as `medium` with
 `matchedBy: ["value"]`: it is a reuse candidate, not proof that the Figma layer was bound to that
 semantic token. Same-value candidates remain ambiguous, and more than three are counted rather than
 dumped. Stable Kiwi shared-style ids are returned as opaque `unresolvedStyleRefs`; the reader does
-not invent style names or variable collections that are absent from the captured wire data. The
-portable release does not evaluate JavaScript or TypeScript token configs.
+not invent style names or variable collections that are absent from the captured wire data.
+JavaScript and TypeScript configs are parsed without executing project code; imported spreads,
+computed keys, and function values are skipped and reported in `caveats`.
 
 Load `packages/kiwi-reader/extension` as an unpacked extension in Chrome 116 or newer. After starting
 the probe or MCP server, activate the target Figma tab, click **Figwright Kiwi Reader**, and choose

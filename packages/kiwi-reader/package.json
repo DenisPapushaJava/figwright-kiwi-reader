@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@babel/parser": "^7.29.8",
     "@modelcontextprotocol/server": "^2.0.0",
     "fdir": "^6.5.0",
     "fzstd": "^0.1.1",

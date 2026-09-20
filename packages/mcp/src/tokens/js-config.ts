@@ -26,11 +26,22 @@
 // These tokens have no CSS custom property — both frameworks inline theme values into the utilities
 // they generate — which is why `ProjectToken` models its reference forms as a union: utility-only.
 
-import { parseSync } from 'oxc-parser';
+import { parse } from '@babel/parser';
 
 import type { ProjectToken } from './tokens.js';
 
-/* eslint-disable @typescript-eslint/no-explicit-any -- oxc AST walker below, as in scan/scan.ts */
+/* eslint-disable @typescript-eslint/no-explicit-any -- ESTree walker over parser-owned node shapes */
+
+// The token reader is shared with the standalone Kiwi bundle, so its syntax front-end must be pure
+// JavaScript. Babel's ESTree mode preserves the Property/Literal node shapes the extractor expects
+// while handling TypeScript config syntax such as `satisfies Config`, without loading or executing
+// the project. The component scanner still uses native oxc separately; it is not part of Kiwi.
+const parseProgram = (filePath: string, code: string): any =>
+  parse(code, {
+    sourceFilename: filePath,
+    sourceType: 'unambiguous',
+    plugins: ['typescript', 'estree'],
+  }).program;
 
 /** One theme scale: where the config keeps it, and what the emitted token is called. */
 interface Scale {
@@ -380,7 +391,7 @@ const readThemeScales = (
 ): JsConfigTokens => {
   let program: any;
   try {
-    program = parseSync(filePath, code).program;
+    program = parseProgram(filePath, code);
   } catch {
     return NO_THEME;
   }
@@ -557,7 +568,7 @@ const scanUnoPresets = (config: any, program: any): { identified: boolean; wind4
 export const declaresVocabularyPreset = (filePath: string, code: string): boolean | null => {
   let program: any;
   try {
-    program = parseSync(filePath, code).program;
+    program = parseProgram(filePath, code);
   } catch {
     return null;
   }

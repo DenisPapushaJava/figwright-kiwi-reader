@@ -395,10 +395,11 @@ a section plan that preserves the same `rootDir` workflow across Codex and other
 grounders reuse existing pure Figwright scanners against a portable, gitignore-aware project index.
 The standalone bundle confirms component exports and names but deliberately leaves prop coverage
 unknown instead of shipping the native AST parser; explicit component-map overrides still work and
-stale targets are reported. `token_map` scans CSS custom properties and SCSS variables, then reports
-exact color-value matches as medium-confidence, name-blind candidates. Stable shared-style ids are
-surfaced as opaque references. Figma variable/style-name resolution, JS/TS token configs, and broader
-live UI-kit parity remain open.
+stale targets are reported. `token_map` scans CSS custom properties, SCSS variables, and statically
+readable Tailwind/UnoCSS JavaScript or TypeScript theme configs, then reports exact color-value
+matches as medium-confidence, name-blind candidates. Configs are never executed; runtime imports,
+computed keys, and function values are reported as skipped. Stable shared-style ids are surfaced as
+opaque references. Figma variable/style-name resolution and broader live UI-kit parity remain open.
 
 - Resolve shared style references to stable names and values when wire evidence becomes available;
   until then preserve their ids and keep value-only project matches explicitly provisional.
