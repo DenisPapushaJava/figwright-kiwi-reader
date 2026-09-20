@@ -54,8 +54,10 @@ remain available for focused inspection and retries.
 The 1,500,000-byte response limit uses the serialized UTF-8 size rather than JavaScript character
 count. If the design slice alone exceeds it, `get_implementation_context` returns its plan before
 scanning the project. Repeated reads share a bounded per-session LRU cache for captured and normalized
-subtrees; any scenegraph revision conservatively invalidates that cache so expanded instances cannot
-retain stale master data.
+subtrees. Each entry records the child, parent, and external component-master nodes used to build it,
+so unrelated scenegraph updates keep that entry warm while a dependency change invalidates only the
+affected entry. If the bounded change history no longer covers an entry's revision, the reader falls
+back to rebuilding it.
 
 ## Shared MCP hub
 
