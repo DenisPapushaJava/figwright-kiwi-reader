@@ -52,8 +52,8 @@ unless current evidence requires a change; when that happens, update the plan wi
   `icon_map`, and `token_map` evidence in one bounded response. Use the separate mapping tools only
   for focused retries. Reuse high-confidence component/icon matches and verify medium matches. Treat
   every Kiwi token candidate marked `matchedBy: ['value']` as name-blind reuse evidence, not a proven
-  Figma binding. Never infer missing component props when the result reports the portable name-only
-  scan caveat.
+  Figma binding. Only infer missing component props from a contract marked complete; incomplete
+  React contracts and name-only Vue, Svelte or Angular scans prove no missing props.
 - After changes to `mcp` or `shared`, build before live testing because the server runs `dist`.
 - When changing scenegraph caching, preserve dependencies outside the requested subtree: parent layout
   context, component masters, component sets, and both ancestor chains of a reparented node.

@@ -581,8 +581,8 @@ export const createKiwiMcpServer = (
     'scan_components',
     {
       description:
-        'Index exported UI components in the local project. The portable Kiwi scan verifies names ' +
-        'and exports without claiming prop coverage it cannot prove.',
+        'Index exported UI components in the local project. The portable Kiwi scan statically ' +
+        'resolves locally declared React props and marks every incomplete contract honestly.',
       inputSchema: z.object({
         rootDir: z.string().min(1).optional(),
         extensions: z.array(z.string().min(1)).optional(),
@@ -808,10 +808,10 @@ export const createKiwiMcpServer = (
         capabilities: {
           design: context.capabilities,
           grounding: {
-            components: 'portable-export-name-match',
+            components: 'portable-export-and-react-prop-match',
             icons: 'strict-svg-name-match',
             tokens: 'exact-observed-color-match',
-            componentProps: 'unavailable-in-portable-scan',
+            componentProps: 'react-static-ast; other-frameworks-unavailable',
             figmaVariables: 'unavailable-in-kiwi-capture',
           },
         },

@@ -58,7 +58,7 @@ afterEach(async () => {
 });
 
 describe('portable Kiwi project grounding', () => {
-  it('profiles and indexes exported components without claiming unproven props', async () => {
+  it('profiles and indexes exported React components with statically proven props', async () => {
     const rootDir = await projectFixture();
 
     const profile = await analyzePortableProject(rootDir);
@@ -67,7 +67,7 @@ describe('portable Kiwi project grounding', () => {
       language: 'ts',
       styling: { system: 'tailwind', tailwindVersion: 4 },
       svg: { mode: 'component', loader: 'vite-plugin-svgr' },
-      scanMode: 'portable-name-only',
+      scanMode: 'portable-static-ast',
     });
 
     const scan = await scanPortableComponents(rootDir);
@@ -76,12 +76,12 @@ describe('portable Kiwi project grounding', () => {
         name: 'Button',
         filePath: 'src/Button.tsx',
         exportKind: 'named',
-        propNames: [],
-        propsExtracted: false,
+        propNames: ['size'],
+        propsExtracted: true,
         framework: 'react',
       },
     ]);
-    expect(scan.profile.caveats.join(' ')).toContain('Prop coverage is intentionally unknown');
+    expect(scan.profile.caveats.join(' ')).toContain('statically reads React component props');
   });
 
   it('reuses one verified project profile across combined grounding scans', async () => {
@@ -105,7 +105,7 @@ describe('portable Kiwi project grounding', () => {
     expect(profile.framework).toBe('react');
   });
 
-  it('maps Kiwi component instances to project components without inventing prop gaps', async () => {
+  it('maps Kiwi component instances and reports proven React prop coverage', async () => {
     const rootDir = await projectFixture();
     const design: DesignContextNode = {
       id: '1:1',
@@ -128,7 +128,7 @@ describe('portable Kiwi project grounding', () => {
 
     expect(result).toMatchObject({
       scannedComponentCount: 1,
-      scanMode: 'portable-name-only',
+      scanMode: 'portable-static-ast',
       unmapped: [],
       mappings: [
         {
@@ -139,8 +139,8 @@ describe('portable Kiwi project grounding', () => {
           candidate: {
             name: 'Button',
             filePath: 'src/Button.tsx',
-            matchedProps: [],
-            unmatchedProps: [],
+            matchedProps: ['Size'],
+            unmatchedProps: ['State'],
           },
         },
       ],
