@@ -116,11 +116,12 @@ reported in the response capture metadata instead of looping or silently inventi
 
 `component_map` joins those grounded Figma component identities to exported components under the
 requested local `rootDir`; `icon_map` performs a stricter near-exact join against existing SVG files
-and reports their color/import contract. The portable Kiwi release deliberately indexes component
-exports and names without bundling the native AST parser used by the full Figwright server. It
-therefore marks prop extraction as unknown and never invents missing-prop TODOs. A verified
-`docs/figma-component-map.md` row remains the authoritative override, while stale file targets are
-reported instead of returned as usable imports.
+and reports their color/import contract. The portable Kiwi release statically parses React source
+without executing it and resolves locally declared prop types, destructured props, common wrappers,
+function components and class components. Imported or otherwise unreadable prop contracts remain
+explicitly incomplete, so the join never invents missing-prop TODOs. Vue, Svelte and Angular are
+still indexed by component name only. A verified `docs/figma-component-map.md` row remains the
+authoritative override, while stale file targets are reported instead of returned as usable imports.
 
 `token_map` collects colors actually used by the selected subtree (solid fills, strokes, gradient
 stops, shadow colors, and mixed-text runs) and joins them by exact value to CSS custom properties,

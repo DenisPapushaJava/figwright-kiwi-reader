@@ -14,14 +14,15 @@ import { collectFigmaIcons, type IconMapping, joinIcons } from '../../mcp/src/jo
 import { analyzeProject, type ProjectProfile } from '../../mcp/src/profile/profile.js';
 import { truncationNote, walkRepoFiles } from '../../mcp/src/repo-walk.js';
 import type { ComponentFramework, ScannedComponent } from '../../mcp/src/scan/scan.js';
+import { extractPortableReactComponents } from './portable-react-components.js';
 
 const DEFAULT_THRESHOLD = 0.7;
 const MAP_FILE = 'docs/figma-component-map.md';
 const MAX_SOURCE_FILE_BYTES = 2 * 1024 * 1024;
-const PORTABLE_SCAN_MODE = 'portable-name-only' as const;
+const PORTABLE_SCAN_MODE = 'portable-static-ast' as const;
 const PORTABLE_SCAN_CAVEAT =
-  'The standalone Kiwi bundle verifies component exports and names without a native AST parser. ' +
-  'Prop coverage is intentionally unknown, so unmatchedProps is never inferred from this scan.';
+  'The standalone Kiwi bundle statically reads React component props with a pure JavaScript parser. ' +
+  'Vue, Svelte and Angular prop coverage remains unknown, so unmatchedProps is not inferred for those scans.';
 
 interface PackageJson {
   dependencies?: Record<string, string>;
@@ -172,6 +173,8 @@ const portableComponentsIn = (
     const match = /@Component\s*\([\s\S]*?\)\s*export\s+class\s+([A-Z][A-Za-z0-9]*)\b/.exec(body);
     return match?.[1] === undefined ? [] : [{ ...base, name: match[1], exportKind: 'named' }];
   }
+  const parsed = extractPortableReactComponents(filePath, body);
+  if (parsed !== null) return parsed;
   if (!hasJsx(body)) return [];
   const fileName = pascalName(filePath);
   const names = new Set([...exportedBindings(body)].filter(name => name === fileName));

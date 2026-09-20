@@ -359,7 +359,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       );
       expect(analyzed).toMatchObject({
         framework: 'react',
-        scanMode: 'portable-name-only',
+        scanMode: 'portable-static-ast',
       });
 
       const scanned = parseToolText(
@@ -369,8 +369,8 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         }),
       );
       expect(scanned).toMatchObject({
-        scanMode: 'portable-name-only',
-        components: [{ name: 'Button', filePath: 'Button.tsx', propsExtracted: false }],
+        scanMode: 'portable-static-ast',
+        components: [{ name: 'Button', filePath: 'Button.tsx', propsExtracted: true }],
       });
 
       const componentMap = parseToolText(
@@ -423,9 +423,10 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         capabilities: {
           design: { componentInstances: 'resolved' },
           grounding: {
-            components: 'portable-export-name-match',
+            components: 'portable-export-and-react-prop-match',
             icons: 'strict-svg-name-match',
             tokens: 'exact-observed-color-match',
+            componentProps: 'react-static-ast; other-frameworks-unavailable',
           },
         },
         design: {
@@ -435,7 +436,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         project: {
           profile: { framework: 'react' },
           scanModes: {
-            components: 'portable-name-only',
+            components: 'portable-static-ast',
             tokens: 'portable-css-scss-js-config',
           },
         },

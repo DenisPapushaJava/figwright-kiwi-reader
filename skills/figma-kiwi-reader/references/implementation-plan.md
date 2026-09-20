@@ -393,9 +393,10 @@ MCP. `get_implementation_context` combines the full design tree, asset inventory
 and all three grounding dimensions in one client-independent, bounded response; large results return
 a section plan that preserves the same `rootDir` workflow across Codex and other MCP clients. The
 grounders reuse existing pure Figwright scanners against a portable, gitignore-aware project index.
-The standalone bundle confirms component exports and names but deliberately leaves prop coverage
-unknown instead of shipping the native AST parser; explicit component-map overrides still work and
-stale targets are reported. `token_map` scans CSS custom properties, SCSS variables, and statically
+The standalone bundle confirms component exports and names and statically resolves locally declared
+React prop contracts through its pure JavaScript parser. Imported/incomplete React contracts and
+Vue, Svelte or Angular prop coverage remain explicitly unknown; component-map overrides still work
+and stale targets are reported. `token_map` scans CSS custom properties, SCSS variables, and statically
 readable Tailwind/UnoCSS JavaScript or TypeScript theme configs, then reports exact color-value
 matches as medium-confidence, name-blind candidates. Configs are never executed; runtime imports,
 computed keys, and function values are reported as skipped. Stable shared-style ids are surfaced as

@@ -13,7 +13,7 @@
     },
     "packages/kiwi-reader": {
       "project": ["src/**/*.ts"],
-      "ignoreDependencies": ["@babel/parser", "fdir", "ignore"]
+      "ignoreDependencies": ["fdir", "ignore"]
     },
     "packages/plugin": {
       "project": ["protocol/**/*.ts", "src/**/*.ts", "ui/**/*.{ts,vue,css}"]

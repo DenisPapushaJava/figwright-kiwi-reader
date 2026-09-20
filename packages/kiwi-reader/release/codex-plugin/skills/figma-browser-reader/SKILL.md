@@ -22,8 +22,9 @@ strictly read-only and does not use Figma REST API tokens, OAuth, or the Figma P
    with the same `rootDir`. Fields listed in `deferred` were intentionally skipped by the planning
    response and become available in those section reads; do not report them as unsupported.
 5. Reuse high-confidence component/icon matches, verify medium matches, and treat
-   `matchedBy: ['value']` token candidates as name-blind evidence, not proven Figma bindings. Respect
-   the portable scan caveat: unknown component props are not evidence that props are absent.
+   `matchedBy: ['value']` token candidates as name-blind evidence, not proven Figma bindings. React
+   prop contracts marked complete may produce actionable unmatched-prop gaps; unknown or incomplete
+   contracts in any framework are not evidence that props are absent.
 6. Preserve node IDs and report unavailable assets, variables, fonts or component metadata.
 
 Never request Figma cookies, authentication tokens, a personal access token or edit permission.
