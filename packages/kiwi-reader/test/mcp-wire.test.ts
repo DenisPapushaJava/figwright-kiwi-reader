@@ -12,6 +12,8 @@ import { compileSchema, encodeBinarySchema, parseSchema } from 'kiwi-schema';
 import { describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
+import { encodeRgbaPng } from '../src/png-diff.js';
+
 const DIST_ENTRY = join(import.meta.dirname, '..', 'dist', 'mcp.mjs');
 const HUB_ENTRY = join(import.meta.dirname, '..', 'dist', 'hub.mjs');
 
@@ -215,7 +217,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         tools: Array<{
           name: string;
           description?: string;
-          inputSchema?: { required?: string[] };
+          inputSchema?: { required?: string[]; properties?: Record<string, unknown> };
         }>;
       };
       expect(result.tools.map(tool => tool.name)).toEqual([
@@ -238,6 +240,13 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(result.tools.find(tool => tool.name === 'get_implementation_context')).toMatchObject({
         description: expect.stringContaining('client-independent implementation payload'),
         inputSchema: { required: expect.arrayContaining(['rootDir']) },
+      });
+      expect(result.tools.find(tool => tool.name === 'compare_screenshots')).toMatchObject({
+        description: expect.stringContaining('dynamic regions'),
+        inputSchema: {
+          required: expect.arrayContaining(['referencePath', 'actualPath', 'diffPath']),
+          properties: expect.objectContaining({ ignoreRegions: expect.any(Object) }),
+        },
       });
 
       const status = await send('tools/call', { name: 'browser_status', arguments: {} });
@@ -538,6 +547,41 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         width: 1280,
         height: 720,
         cropConfidence: 'viewport-only',
+      });
+
+      const actualPath = join(assetDirectory, 'actual.png');
+      const diffPath = join(assetDirectory, 'diff.png');
+      await Promise.all([
+        writeFile(
+          referencePath,
+          encodeRgbaPng(2, 1, Uint8Array.from([0, 0, 0, 255, 0, 0, 0, 255])),
+        ),
+        writeFile(
+          actualPath,
+          encodeRgbaPng(2, 1, Uint8Array.from([255, 255, 255, 255, 0, 0, 0, 255])),
+        ),
+      ]);
+      const comparison = parseToolText(
+        await send('tools/call', {
+          name: 'compare_screenshots',
+          arguments: {
+            referencePath,
+            actualPath,
+            diffPath,
+            ignoreRegions: [{ x: 0, y: 0, width: 1, height: 1 }],
+          },
+        }),
+      );
+      expect(comparison).toMatchObject({
+        totalPixels: 2,
+        comparedPixels: 1,
+        ignoredPixels: 1,
+        changedPixels: 0,
+        changedRatio: 0,
+        changedRatioOfTotal: 0,
+        ignoreRegions: [{ x: 0, y: 0, width: 1, height: 1 }],
+        boundingBox: null,
+        diffPath,
       });
 
       const largeFixture = captureFixture('large');

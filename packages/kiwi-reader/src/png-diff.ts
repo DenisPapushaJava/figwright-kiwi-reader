@@ -8,11 +8,22 @@ export interface PngDiffReport {
   width: number;
   height: number;
   totalPixels: number;
+  comparedPixels: number;
+  ignoredPixels: number;
   changedPixels: number;
   changedRatio: number;
+  changedRatioOfTotal: number;
   tolerance: number;
+  ignoreRegions: PngDiffRegion[];
   boundingBox: { x: number; y: number; width: number; height: number } | null;
   diffPath: string;
+}
+
+export interface PngDiffRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 const crcTable = Array.from({ length: 256 }, (_, index) => {
@@ -153,6 +164,7 @@ export const comparePngFiles = async (options: {
   actualPath: string;
   diffPath: string;
   tolerance?: number;
+  ignoreRegions?: PngDiffRegion[];
 }): Promise<PngDiffReport> => {
   const tolerance = options.tolerance ?? 0;
   if (!Number.isInteger(tolerance) || tolerance < 0 || tolerance > 255)
@@ -166,6 +178,40 @@ export const comparePngFiles = async (options: {
       `PNG dimensions differ: reference ${reference.width}x${reference.height}, actual ${actual.width}x${actual.height}`,
     );
   }
+  if ((options.ignoreRegions?.length ?? 0) > 256) {
+    throw new Error('ignoreRegions cannot contain more than 256 regions');
+  }
+  const ignoreRegions = (options.ignoreRegions ?? []).map(region => {
+    if (
+      !Number.isSafeInteger(region.x) ||
+      !Number.isSafeInteger(region.y) ||
+      !Number.isSafeInteger(region.width) ||
+      !Number.isSafeInteger(region.height) ||
+      region.x < 0 ||
+      region.y < 0 ||
+      region.width <= 0 ||
+      region.height <= 0
+    ) {
+      throw new Error(
+        'ignore regions must use non-negative integer x/y and positive integer width/height',
+      );
+    }
+    return {
+      x: Math.min(region.x, reference.width),
+      y: Math.min(region.y, reference.height),
+      width: Math.max(0, Math.min(region.width, reference.width - region.x)),
+      height: Math.max(0, Math.min(region.height, reference.height - region.y)),
+    };
+  });
+  const ignored = new Uint8Array(reference.width * reference.height);
+  for (const region of ignoreRegions) {
+    for (let y = region.y; y < region.y + region.height; y++) {
+      const start = y * reference.width + region.x;
+      ignored.fill(1, start, start + region.width);
+    }
+  }
+  let ignoredPixels = 0;
+  for (const value of ignored) ignoredPixels += value;
   const diff = new Uint8Array(reference.rgba.byteLength);
   let changedPixels = 0;
   let minX = reference.width;
@@ -174,6 +220,16 @@ export const comparePngFiles = async (options: {
   let maxY = -1;
   for (let pixel = 0; pixel < reference.width * reference.height; pixel++) {
     const offset = pixel * 4;
+    if (ignored[pixel] === 1) {
+      const gray = Math.round(
+        ((reference.rgba[offset] as number) +
+          (reference.rgba[offset + 1] as number) +
+          (reference.rgba[offset + 2] as number)) /
+          3,
+      );
+      diff.set([gray, gray, gray, 24], offset);
+      continue;
+    }
     let changed = false;
     for (let channel = 0; channel < 4; channel++) {
       if (
@@ -206,13 +262,18 @@ export const comparePngFiles = async (options: {
   await mkdir(dirname(diffPath), { recursive: true });
   await writeFile(diffPath, encodeRgbaPng(reference.width, reference.height, diff));
   const totalPixels = reference.width * reference.height;
+  const comparedPixels = totalPixels - ignoredPixels;
   return {
     width: reference.width,
     height: reference.height,
     totalPixels,
+    comparedPixels,
+    ignoredPixels,
     changedPixels,
-    changedRatio: changedPixels / totalPixels,
+    changedRatio: comparedPixels === 0 ? 0 : changedPixels / comparedPixels,
+    changedRatioOfTotal: changedPixels / totalPixels,
     tolerance,
+    ignoreRegions,
     boundingBox:
       changedPixels === 0
         ? null
