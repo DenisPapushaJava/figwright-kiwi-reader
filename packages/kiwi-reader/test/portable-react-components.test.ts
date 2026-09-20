@@ -102,6 +102,27 @@ describe('portable React component extraction', () => {
     ]);
   });
 
+  it('reads function-shaped component declarations from package type entrypoints', () => {
+    expect(
+      extractPortableReactComponents(
+        '@fixture/ui',
+        `
+          export type IconProps = { name?: string; size?: number };
+          export declare const Icon: ({ name, size }: IconProps) => JSX.Element | null;
+          export declare const Registry: Record<string, unknown>;
+        `,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        name: 'Icon',
+        filePath: '@fixture/ui',
+        exportKind: 'named',
+        propNames: ['name', 'size'],
+        propsExtracted: true,
+      }),
+    ]);
+  });
+
   it('returns null for invalid syntax so the name-only fallback remains available', () => {
     expect(extractPortableReactComponents('src/Button.tsx', 'export const Button = <')).toBeNull();
   });

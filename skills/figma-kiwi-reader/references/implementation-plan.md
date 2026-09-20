@@ -405,13 +405,18 @@ and all three grounding dimensions in one client-independent, bounded response; 
 a section plan that preserves the same `rootDir` workflow across Codex and other MCP clients. The
 grounders reuse existing pure Figwright scanners against a portable, gitignore-aware project index.
 The standalone bundle confirms component exports and names and statically resolves locally declared
-React prop contracts through its pure JavaScript parser. Imported/incomplete React contracts and
-Vue, Svelte or Angular prop coverage remain explicitly unknown; component-map overrides still work
-and stale targets are reported. `token_map` scans CSS custom properties, SCSS variables, and statically
-readable Tailwind/UnoCSS JavaScript or TypeScript theme configs, then reports exact color-value
-matches as medium-confidence, name-blind candidates. Configs are never executed; runtime imports,
-computed keys, and function values are reported as skipped. Stable shared-style ids are surfaced as
-opaque references. Figma variable/style-name resolution and broader live UI-kit parity remain open.
+React prop contracts through its pure JavaScript parser. It now also builds a bounded generic catalog
+from actual package imports and JSX, public `exports` / `types`, `.d.ts` declarations, CSS/SCSS
+entrypoints, and statically evidenced icon registries. Component matches return package import
+contracts; registry icon matches return the component, prop and exact value; dependency tokens return
+their public style import source. No library name is built in and dependency code is never executed.
+Observed imports outrank unused same-name package exports, while genuinely used collisions and
+duplicate icon basenames remain explicit ambiguities. Imported/incomplete React contracts and Vue,
+Svelte or Angular prop coverage remain explicitly unknown; component-map overrides still work and
+stale targets are reported. `token_map` reports exact color-value matches as medium-confidence,
+name-blind candidates across project and dependency styles. Runtime imports, computed keys, generated
+registries and function values that static evidence cannot resolve remain skipped. Stable shared-style
+ids are surfaced as opaque references. Figma variable/style-name resolution remains open.
 
 - Resolve shared style references to stable names and values when wire evidence becomes available;
   until then preserve their ids and keep value-only project matches explicitly provisional.

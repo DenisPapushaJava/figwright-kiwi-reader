@@ -432,10 +432,11 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         capabilities: {
           design: { componentInstances: 'resolved' },
           grounding: {
-            components: 'portable-export-and-react-prop-match',
-            icons: 'strict-svg-name-match',
-            tokens: 'exact-observed-color-match',
-            componentProps: 'react-static-ast; other-frameworks-unavailable',
+            components: 'project-and-installed-dependency-static-match',
+            icons: 'strict-svg-and-dependency-registry-match',
+            tokens: 'exact-observed-color-match-in-project-and-dependencies',
+            componentProps:
+              'react-static-ast-and-package-declarations; other-frameworks-unavailable',
           },
         },
         design: {
