@@ -103,7 +103,7 @@ const sessionByTarget = (
       throw new Error(`No decoded Figma tab matches ${label}. Call list_files and retry.`);
     }
     throw new Error(
-      'No decoded Figma tab is available. Open the file in Chrome and click the Figwright Kiwi Reader extension.',
+      'No decoded Figma tab is available. Open the file in Chrome and click the FigLens extension.',
     );
   }
   return selected;
@@ -302,6 +302,38 @@ const sectionPlanRoot = (result: ReturnType<typeof pickNode>): CapturedNode =>
     : (result.session.graph.find(result.selectedNodeId, 1, MAX_SECTION_PLAN_SECTIONS + 1) ??
       result.captured);
 
+const sectionPlanForResult = (result: ReturnType<typeof pickNode>, reason: string) => {
+  if (result.stats.nodeLimitReached || result.stats.depthLimitReached) {
+    const outline = result.session.graph.sectionOutline(
+      result.selectedNodeId,
+      MAX_SECTION_PLAN_SECTIONS,
+    );
+    if (outline !== null && outline.totalSections > 0) {
+      const sections = outline.sections.map(section => ({
+        nodeId: section.id,
+        ...boundedName(section.name),
+        type: section.type,
+        nodes: section.nodes,
+      }));
+      return {
+        schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
+        nodes: [
+          { id: outline.root.id, ...boundedName(outline.root.name), type: outline.root.type },
+        ],
+        sectionPlan: {
+          reason,
+          totalNodes: outline.totalNodes,
+          sections,
+          sectionsTruncated: outline.totalSections > sections.length,
+          omittedSections: Math.max(0, outline.totalSections - sections.length),
+        },
+        note: 'Request each section nodeId with get_design_context at detail full.',
+      };
+    }
+  }
+  return sectionPlan(sectionPlanRoot(result), reason);
+};
+
 const projectionBudgetReason = (
   root: CapturedNode,
   detail: DetailLevel,
@@ -368,7 +400,7 @@ export const createKiwiMcpServer = (
   const persistentRouting = options.persistentRouting ?? true;
   const routing = options.routing ?? { boundTabId: null };
   const server = new McpServer(
-    { name: 'figwright-kiwi-reader', version: '0.1.0' },
+    { name: 'figlens', version: '0.1.0' },
     {
       instructions:
         'Read-only Figma browser capture. For implementation in an existing codebase, call get_implementation_context once with that project rootDir; it returns the full design tree plus component, icon, and token grounding. Use get_design_context for design-only inspection. Follow sectionPlan for large selections. No Figma writes are available.',
@@ -497,7 +529,7 @@ export const createKiwiMcpServer = (
       if (preflightReason !== null) {
         return textResult({
           node: { id: result.captured.id, name: result.captured.name, type: result.captured.type },
-          ...sectionPlan(result.captured, preflightReason),
+          ...sectionPlanForResult(result, preflightReason),
         });
       }
       const output = {
@@ -519,7 +551,7 @@ export const createKiwiMcpServer = (
       if (bytes > MAX_RESPONSE_BYTES) {
         return textResult({
           node: { id: result.captured.id, name: result.captured.name, type: result.captured.type },
-          ...sectionPlan(result.captured, `payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`),
+          ...sectionPlanForResult(result, `payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`),
         });
       }
       return serializedTextResult(serialized);
@@ -550,14 +582,14 @@ export const createKiwiMcpServer = (
       const resolvedDetail = detail ?? 'full';
       const preflightReason = projectionBudgetReason(result.captured, resolvedDetail, 'design');
       if (preflightReason !== null) {
-        return textResult(sectionPlan(result.captured, preflightReason));
+        return textResult(sectionPlanForResult(result, preflightReason));
       }
       const output = designContext(result, resolvedDetail);
       const serialized = serializeJson(output);
       const bytes = serializedBytes(serialized);
       if (bytes > MAX_RESPONSE_BYTES) {
         return textResult(
-          sectionPlan(result.captured, `payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`),
+          sectionPlanForResult(result, `payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`),
         );
       }
       return serializedTextResult(serialized);
@@ -724,8 +756,8 @@ export const createKiwiMcpServer = (
         ...(fileKey === undefined ? {} : { fileKey }),
       });
       if (result.stats.nodeLimitReached || result.stats.depthLimitReached) {
-        const plan = sectionPlan(
-          sectionPlanRoot(result),
+        const plan = sectionPlanForResult(
+          result,
           `captured subtree truncated after ${result.stats.visited} nodes`,
         );
         return textResult({
@@ -743,7 +775,7 @@ export const createKiwiMcpServer = (
       }
       const preflightReason = projectionBudgetReason(result.captured, 'full', 'design');
       if (preflightReason !== null) {
-        const plan = sectionPlan(sectionPlanRoot(result), preflightReason);
+        const plan = sectionPlanForResult(result, preflightReason);
         return textResult({
           schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
           designSchemaVersion: plan.schemaVersion,
@@ -760,8 +792,8 @@ export const createKiwiMcpServer = (
       const context = designContext(result, 'full');
       const designBytes = jsonBytes(context);
       if (designBytes > MAX_RESPONSE_BYTES) {
-        const plan = sectionPlan(
-          sectionPlanRoot(result),
+        const plan = sectionPlanForResult(
+          result,
           `design payload ${designBytes} bytes exceeds ${MAX_RESPONSE_BYTES}`,
         );
         return textResult({
@@ -840,8 +872,8 @@ export const createKiwiMcpServer = (
       const serialized = serializeJson(output);
       const bytes = serializedBytes(serialized);
       if (bytes > MAX_RESPONSE_BYTES) {
-        const plan = sectionPlan(
-          sectionPlanRoot(result),
+        const plan = sectionPlanForResult(
+          result,
           `implementation payload ${bytes} bytes exceeds ${MAX_RESPONSE_BYTES}`,
         );
         return textResult({

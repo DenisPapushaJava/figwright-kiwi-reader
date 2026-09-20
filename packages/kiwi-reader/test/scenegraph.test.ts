@@ -120,6 +120,47 @@ describe('SceneGraphStore', () => {
     });
   });
 
+  it('outlines later root sections even when the first section exhausts the read budget', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 41, localID: 1 }, name: 'Canvas', type: 'CANVAS' },
+        {
+          guid: { sessionID: 41, localID: 2 },
+          parentIndex: { guid: { sessionID: 41, localID: 1 }, position: 'a' },
+          name: 'Large first section',
+          type: 'SECTION',
+        },
+        ...[3, 4, 5].map(localID => ({
+          guid: { sessionID: 41, localID },
+          parentIndex: { guid: { sessionID: 41, localID: 2 }, position: `${localID}` },
+          name: `Nested ${localID}`,
+          type: 'FRAME',
+        })),
+        {
+          guid: { sessionID: 41, localID: 6 },
+          parentIndex: { guid: { sessionID: 41, localID: 1 }, position: 'b' },
+          name: 'Later sibling',
+          type: 'SECTION',
+        },
+      ],
+    });
+
+    expect(graph.findWithStats('41:1', 10, 3)).toMatchObject({
+      nodeLimitReached: true,
+      node: { children: [{ id: '41:2' }] },
+    });
+    expect(graph.sectionOutline('41:1', 10)).toEqual({
+      root: { id: '41:1', name: 'Canvas', type: 'CANVAS' },
+      totalNodes: 6,
+      totalSections: 2,
+      sections: [
+        { id: '41:2', name: 'Large first section', type: 'SECTION', nodes: 4 },
+        { id: '41:6', name: 'Later sibling', type: 'SECTION', nodes: 1 },
+      ],
+    });
+  });
+
   it('expands a component master and applies explicit and derived instance overrides', () => {
     const graph = new SceneGraphStore();
     graph.apply({

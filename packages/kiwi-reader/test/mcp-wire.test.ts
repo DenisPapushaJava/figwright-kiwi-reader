@@ -629,7 +629,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(sectionedResponse.result).toBeDefined();
       expect(JSON.stringify(sectioned).length).toBeLessThan(1_500_000);
       expect(sectioned).toMatchObject({
-        sectionPlan: { sectionsTruncated: true, omittedSections: 1_799 },
+        sectionPlan: { totalNodes: 2_001, sectionsTruncated: true, omittedSections: 1_800 },
       });
 
       const implementationPlanResponse = await send('tools/call', {
@@ -641,7 +641,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(implementationPlan).toMatchObject({
         schemaVersion: 'figwright-kiwi-implementation@1',
         designSchemaVersion: 'figwright-kiwi-context@1',
-        sectionPlan: { sectionsTruncated: true, omittedSections: 1_799 },
+        sectionPlan: { totalNodes: 2_001, sectionsTruncated: true, omittedSections: 1_800 },
         capture: { truncated: true },
         deferred: ['design', 'assets', 'project', 'grounding'],
         note: expect.stringContaining('get_implementation_context'),
