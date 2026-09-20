@@ -171,6 +171,14 @@ With dependency-aware caching installed, the same response was byte-identical: t
 with no second normalization. The process then used about 361 MB working set and 333 MB private
 memory. These single samples validate the cache path; they do not establish a general speedup.
 
+An additional live sample read the current 22,391-node PM DEV page from root `0:1` after the
+pre-normalization budget landed. `get_design_context` visited its bounded 2,000-node slice and
+returned 999,587 UTF-8 bytes in 269 ms; a warm repeat took 147 ms with one cache hit and no second
+normalization. For the intended cross-client entry point, `get_implementation_context` returned an
+848-byte `sectionPlan` in 17 ms, deferred design/project grounding, and did not increment the
+normalization counter. The hub then used about 393 MB working set and 370 MB private memory. This is
+another single-session diagnostic sample; the separate 65,662-node baseline remains required.
+
 - Reuse Figwright's node-count and response-size guard concepts.
 - Apply limits before constructing or JSON-stringifying a complete response.
 - Deduplicate repeated component instances while retaining text and visual overrides.
