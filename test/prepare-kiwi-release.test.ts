@@ -32,6 +32,15 @@ afterEach(async () => {
 });
 
 describe('Kiwi Reader release preparation', () => {
+  it('keeps the installer ASCII-compatible with Windows PowerShell 5.1', async () => {
+    const installer = await readFile(
+      join(import.meta.dirname, '../packages/kiwi-reader/release/install.ps1'),
+      'utf8',
+    );
+
+    expect([...installer].every(character => character.charCodeAt(0) <= 0x7f)).toBe(true);
+  });
+
   it.each([
     ['patch', '0.3.2'],
     ['minor', '0.4.0'],

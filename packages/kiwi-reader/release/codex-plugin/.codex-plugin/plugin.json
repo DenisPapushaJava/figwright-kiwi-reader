@@ -19,7 +19,7 @@
     "capabilities": ["Read"],
     "defaultPrompt": [
       "Read the selected Figma frame.",
-      "Get design context from this Figma URL.",
+      "Prepare the selected frame for implementation in the current project.",
       "Check the Figma browser connection."
     ]
   }
