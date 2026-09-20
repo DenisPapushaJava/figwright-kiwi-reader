@@ -47,8 +47,9 @@ For code generation, prefer one `get_implementation_context` call with the codeb
 `rootDir`. It returns full design context, asset inventory, project profile, component/icon reuse,
 and observed-color token candidates under one response budget. If the captured tree is truncated or
 the combined payload is too large, it returns a `sectionPlan`; call the same tool for each section
-with the same `rootDir`. The separate mapping tools remain available for focused inspection and
-retries.
+with the same `rootDir`. A plan response skips full design projection and project grounding; the
+`deferred` list names the fields that appear in the section responses. The separate mapping tools
+remain available for focused inspection and retries.
 
 ## Shared MCP hub
 

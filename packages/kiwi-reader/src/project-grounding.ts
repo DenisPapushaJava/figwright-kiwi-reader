@@ -335,8 +335,9 @@ const portableComponentsIn = (
 export const scanPortableComponents = async (
   rootDir: string,
   extensions?: readonly string[],
+  knownProfile?: PortableProjectProfile,
 ): Promise<PortableComponentScan> => {
-  const profile = await analyzePortableProject(rootDir);
+  const profile = knownProfile ?? (await analyzePortableProject(rootDir));
   const selectedExtensions = extensions ?? profile.componentExtensions;
   const walk = await walkRepoFiles(profile.rootDir, { extensions: selectedExtensions });
   const components: ScannedComponent[] = [];
@@ -387,10 +388,11 @@ export const mapProjectComponents = async (input: {
   rootDir: string;
   threshold?: number;
   captureCaveats?: readonly string[];
+  profile?: PortableProjectProfile;
 }): Promise<KiwiComponentMapResult> => {
   const threshold = input.threshold ?? DEFAULT_THRESHOLD;
   const [scan, overrideState] = await Promise.all([
-    scanPortableComponents(input.rootDir),
+    scanPortableComponents(input.rootDir, undefined, input.profile),
     readOverrides(resolve(input.rootDir)),
   ]);
   const mappings = joinComponents(collectFigmaComponents(input.roots), scan.components, {
@@ -421,10 +423,11 @@ export const mapProjectIcons = async (input: {
   rootDir: string;
   threshold?: number;
   captureCaveats?: readonly string[];
+  profile?: PortableProjectProfile;
 }): Promise<KiwiIconMapResult> => {
   const rootDir = resolve(input.rootDir);
   const [profile, svgs, packageJson] = await Promise.all([
-    analyzePortableProject(rootDir),
+    input.profile ?? analyzePortableProject(rootDir),
     scanRepoSvgs(rootDir),
     readPackageJson(rootDir),
   ]);

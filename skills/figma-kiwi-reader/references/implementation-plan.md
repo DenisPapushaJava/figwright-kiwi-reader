@@ -150,6 +150,12 @@ one client does not stop browser capture for the other.
 
 ## Phase 4: budgets and large-document behavior
 
+Status: node/depth truncation now returns an implementation `sectionPlan` before full design
+projection or any project scan. Complete implementation responses analyze the portable project
+profile once and reuse it across component, icon and token grounding. Exact response-byte overflow
+is still caught after materialization; a measured preflight estimate, normalized-node cache and the
+65,662-node timing/memory baseline remain open.
+
 - Reuse Figwright's node-count and response-size guard concepts.
 - Apply limits before constructing or JSON-stringifying a complete response.
 - Deduplicate repeated component instances while retaining text and visual overrides.

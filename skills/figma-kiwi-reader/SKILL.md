@@ -34,6 +34,9 @@ unless current evidence requires a change; when that happens, update the plan wi
   long-lived node contract.
 - Apply depth, node-count, byte, and field budgets before serializing results. A large section must
   return a section plan or explicit truncation metadata, never a multi-megabyte raw dump.
+- Treat fields listed in an implementation response's `deferred` array as intentionally postponed,
+  not unavailable. Request every `sectionPlan` node with the same `rootDir` before grounding or code
+  generation.
 - In the shared HTTP hub, route every read explicitly with `tabId` or `fileKey` after `list_files`
   when more than one tab is available. Never add process-global active-file state to shared mode.
 - Keep one capture owner and fan out normalized reads through Streamable HTTP. Preserve the stdio

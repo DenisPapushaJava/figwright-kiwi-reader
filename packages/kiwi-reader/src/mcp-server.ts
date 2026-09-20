@@ -253,24 +253,32 @@ const designAssets = (root: CapturedNode, session: KiwiCaptureSession) => {
   };
 };
 
+const captureMetadata = (result: ReturnType<typeof pickNode>) => ({
+  provider: 'kiwi-browser',
+  fileKey: result.session.fileKey,
+  tabId: result.session.tabId,
+  visited: result.stats.visited,
+  truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
+  instanceResolution: {
+    resolved: result.stats.resolvedInstances,
+    unresolved: result.stats.unresolvedInstances,
+    cycles: result.stats.instanceCycles,
+  },
+});
+
+const sectionPlanRoot = (result: ReturnType<typeof pickNode>): CapturedNode =>
+  result.captured.children.length > 0
+    ? result.captured
+    : (result.session.graph.find(result.selectedNodeId, 1, MAX_SECTION_PLAN_SECTIONS + 1) ??
+      result.captured);
+
 const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel) => {
   const projected = projectNode(normalizeCapturedNode(result.captured), detail);
   const assets = designAssets(result.captured, result.session);
   return {
     schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
     nodes: [projected],
-    capture: {
-      provider: 'kiwi-browser',
-      fileKey: result.session.fileKey,
-      tabId: result.session.tabId,
-      visited: result.stats.visited,
-      truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
-      instanceResolution: {
-        resolved: result.stats.resolvedInstances,
-        unresolved: result.stats.unresolvedInstances,
-        cycles: result.stats.instanceCycles,
-      },
-    },
+    capture: captureMetadata(result),
     capabilities: {
       structuredProperties: 'captured-when-present',
       componentInstances:
@@ -640,7 +648,8 @@ export const createKiwiMcpServer = (
       description:
         'Prepare one bounded, client-independent implementation payload for the selected Figma subtree. ' +
         'It combines full design context, asset inventory, project profile, component reuse, icon reuse, ' +
-        'and observed-color token candidates. Pass the codebase rootDir; follow sectionPlan when returned.',
+        'and observed-color token candidates. Pass the codebase rootDir; follow sectionPlan when returned. ' +
+        'A section-plan response deliberately defers design projection and project grounding until its sections are requested.',
       inputSchema: projectMapInput.extend({ rootDir: z.string().min(1) }),
       annotations: READ_ONLY,
     },
@@ -650,27 +659,41 @@ export const createKiwiMcpServer = (
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
+      if (result.stats.nodeLimitReached || result.stats.depthLimitReached) {
+        const plan = sectionPlan(
+          sectionPlanRoot(result),
+          `captured subtree truncated after ${result.stats.visited} nodes`,
+        );
+        return textResult({
+          schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
+          designSchemaVersion: plan.schemaVersion,
+          nodes: plan.nodes,
+          sectionPlan: plan.sectionPlan,
+          capture: captureMetadata(result),
+          deferred: ['design', 'assets', 'project', 'grounding'],
+          caveats: [
+            `The captured subtree was truncated after ${result.stats.visited} nodes; request its sections before project grounding.`,
+          ],
+          note: 'Request each section nodeId with get_implementation_context using the same rootDir.',
+        });
+      }
       const context = designContext(result, 'full');
       const roots = context.nodes.map(node => DesignContextNodeSchema.parse(node));
-      const captureCaveats = context.capture.truncated
-        ? [
-            `The captured subtree was truncated after ${result.stats.visited} nodes; project grounding may omit descendants outside the captured slice.`,
-          ]
-        : [];
+      const projectProfile = await analyzePortableProject(rootDir);
       const [componentMap, iconMap, tokenMap] = await Promise.all([
         mapProjectComponents({
           roots,
           rootDir,
           ...(threshold === undefined ? {} : { threshold }),
-          captureCaveats,
+          profile: projectProfile,
         }),
         mapProjectIcons({
           roots,
           rootDir,
           ...(threshold === undefined ? {} : { threshold }),
-          captureCaveats,
+          profile: projectProfile,
         }),
-        mapProjectTokens({ roots, rootDir, captureCaveats }),
+        mapProjectTokens({ roots, rootDir, profile: projectProfile }),
       ]);
       const {
         profile,
@@ -714,16 +737,11 @@ export const createKiwiMcpServer = (
         grounding: { components, icons, tokens },
       };
       const chars = JSON.stringify(output).length;
-      if (context.capture.truncated || chars > MAX_RESPONSE_CHARS) {
-        const planRoot =
-          result.captured.children.length > 0
-            ? result.captured
-            : (result.session.graph.find(result.selectedNodeId, 1, MAX_SECTION_PLAN_SECTIONS + 1) ??
-              result.captured);
-        const reason = context.capture.truncated
-          ? `captured subtree truncated after ${result.stats.visited} nodes`
-          : `implementation payload ${chars} chars exceeds ${MAX_RESPONSE_CHARS}`;
-        const plan = sectionPlan(planRoot, reason);
+      if (chars > MAX_RESPONSE_CHARS) {
+        const plan = sectionPlan(
+          sectionPlanRoot(result),
+          `implementation payload ${chars} chars exceeds ${MAX_RESPONSE_CHARS}`,
+        );
         return textResult({
           schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
           designSchemaVersion: plan.schemaVersion,
