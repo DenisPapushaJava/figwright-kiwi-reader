@@ -152,9 +152,12 @@ one client does not stop browser capture for the other.
 
 Status: node/depth truncation now returns an implementation `sectionPlan` before full design
 projection or any project scan. Complete implementation responses analyze the portable project
-profile once and reuse it across component, icon and token grounding. Exact response-byte overflow
-is still caught after materialization; a measured preflight estimate, normalized-node cache and the
-65,662-node timing/memory baseline remain open.
+profile once and reuse it across component, icon and token grounding. Response limits now measure
+serialized UTF-8 bytes, and an oversized design slice returns before any project scan. Repeated reads
+use a bounded per-session captured/normalized-subtree LRU cache; it invalidates conservatively on any
+scenegraph revision because instance masters may live outside the requested subtree. Fine-grained
+dependency-aware invalidation, a cheaper pre-normalization size estimate and the 65,662-node
+timing/memory baseline remain open.
 
 - Reuse Figwright's node-count and response-size guard concepts.
 - Apply limits before constructing or JSON-stringifying a complete response.

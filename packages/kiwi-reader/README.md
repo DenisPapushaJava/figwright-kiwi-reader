@@ -51,6 +51,12 @@ with the same `rootDir`. A plan response skips full design projection and projec
 `deferred` list names the fields that appear in the section responses. The separate mapping tools
 remain available for focused inspection and retries.
 
+The 1,500,000-byte response limit uses the serialized UTF-8 size rather than JavaScript character
+count. If the design slice alone exceeds it, `get_implementation_context` returns its plan before
+scanning the project. Repeated reads share a bounded per-session LRU cache for captured and normalized
+subtrees; any scenegraph revision conservatively invalidates that cache so expanded instances cannot
+retain stale master data.
+
 ## Shared MCP hub
 
 Use one shared process when Codex, Cursor, Claude, or another MCP client must read the same browser
@@ -81,7 +87,7 @@ recommended for normal use.
 Normalized results use Figwright's existing `SerializedNode` contract. They retain geometry,
 paints, effects, text and auto-layout fields already confirmed on live Kiwi traffic while dropping
 `editInfo`, glyph caches and other private or high-volume wire fields. A response above the hard
-payload budget becomes a section plan so an agent can request individual child sections.
+UTF-8 byte budget becomes a section plan so an agent can request individual child sections.
 
 Mixed-style text is reconstructed from Kiwi's per-character style ids and explicit override table.
 Each uniform run carries its exact UTF-16 range, font face, size, numeric weight when metadata is

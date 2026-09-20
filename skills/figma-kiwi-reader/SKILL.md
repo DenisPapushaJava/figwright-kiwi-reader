@@ -32,8 +32,9 @@ unless current evidence requires a change; when that happens, update the plan wi
   frame; SVG extraction cannot be added correctly afterwards.
 - Normalize Kiwi data into the existing `@figwright/shared` schemas. Do not establish a second
   long-lived node contract.
-- Apply depth, node-count, byte, and field budgets before serializing results. A large section must
-  return a section plan or explicit truncation metadata, never a multi-megabyte raw dump.
+- Apply depth, node-count, UTF-8 byte, and field budgets before returning results. Preflight the
+  design slice before project scans, and return a section plan or explicit truncation metadata rather
+  than a multi-megabyte raw dump.
 - Treat fields listed in an implementation response's `deferred` array as intentionally postponed,
   not unavailable. Request every `sectionPlan` node with the same `rootDir` before grounding or code
   generation.

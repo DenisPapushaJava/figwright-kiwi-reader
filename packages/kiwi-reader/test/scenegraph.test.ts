@@ -60,14 +60,20 @@ describe('SceneGraphStore', () => {
 
   it('applies partial updates and removals', () => {
     const graph = new SceneGraphStore();
+    expect(graph.revision).toBe(0);
     graph.apply({ nodeChanges: [{ guid: { sessionID: 2, localID: 4 }, name: 'Before' }] });
+    expect(graph.revision).toBe(1);
     graph.apply({ nodeChanges: [{ guid: { sessionID: 2, localID: 4 }, visible: false }] });
+    expect(graph.revision).toBe(2);
     expect(graph.find('2:4')).toMatchObject({ name: 'Before', visible: false });
 
     graph.apply({
       nodeChanges: [{ guid: { sessionID: 2, localID: 4 }, phase: 'REMOVED' }],
     });
+    expect(graph.revision).toBe(3);
     expect(graph.find('2:4')).toBeNull();
+    graph.clear();
+    expect(graph.revision).toBe(3);
   });
 
   it('rejects an oversized update before partially mutating the graph', () => {
