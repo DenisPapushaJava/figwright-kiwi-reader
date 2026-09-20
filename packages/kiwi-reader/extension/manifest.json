@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FigLens",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxP7FimkYH5xgHQ8cshJTxN23WHmDM2Igs5pb6411NF4P3lQtCB8i7TL4wEuFhyfXvzxo9G++zwt0G0jB+OF+G2UFB6Ghj288z1g4rPw0uXoStkNwSV5dp+Nn64FWXAAUHLxzAdljUgcNMRWKgStT/9w3SDx3TbGWX2MkoHUpKC34A6oWQJyGOEitz/3IeF3WrWvQpcfeya2AMgzYdDGChs/WFDcRx+ZcSQHVA7ffEA7Xw+WO2NNOoLYzyYmNVvzP3i6WDn5J7iNYNpbH9MgHonF3UhklAkaejYT4ha4hKE+DETKJC4tBeljIXNQY+uCe6Su0kZ3hiCXCjVOS12hLnwIDAQAB",
   "minimum_chrome_version": "116",
   "description": "Read-only capture of the Figma scenegraph already delivered to this browser tab.",
