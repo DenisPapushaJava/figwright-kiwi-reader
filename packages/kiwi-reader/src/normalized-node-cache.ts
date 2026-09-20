@@ -16,19 +16,19 @@ export interface NormalizedNodeCacheStats {
 
 export interface CachedNodeRead {
   readonly result: SceneGraphFindResult;
+  revision: number;
   normalized?: SerializedNode | null;
 }
 
 /**
  * Bounded cache for repeated reads from one capture session.
  *
- * A scenegraph revision invalidates every entry. This is deliberately conservative: component
- * instances can depend on masters outside the requested subtree, so keeping entries across an
- * arbitrary graph update would risk returning stale expanded instances.
+ * Every entry records all scenegraph nodes used to build its captured subtree, including parents
+ * and component masters outside that subtree. A later graph revision invalidates only entries whose
+ * dependency set intersects the changed node or one of its ancestors.
  */
 export class NormalizedNodeCache {
   private readonly entries = new Map<string, CachedNodeRead>();
-  private revision: number | null = null;
   private hits = 0;
   private misses = 0;
   private invalidations = 0;
@@ -42,18 +42,28 @@ export class NormalizedNodeCache {
   }
 
   read(graph: SceneGraphStore, nodeId: string, maxDepth: number, maxNodes: number): CachedNodeRead {
-    this.prepareRevision(graph.revision);
     const key = `${nodeId}\u0000${maxDepth}\u0000${maxNodes}`;
     const cached = this.entries.get(key);
-    if (cached !== undefined) {
+    if (
+      cached !== undefined &&
+      !graph.affectsDependenciesSince(cached.revision, cached.result.dependencies)
+    ) {
+      cached.revision = graph.revision;
       this.hits++;
       this.entries.delete(key);
       this.entries.set(key, cached);
       return cached;
     }
+    if (cached !== undefined) {
+      this.entries.delete(key);
+      this.invalidations++;
+    }
 
     this.misses++;
-    const entry: CachedNodeRead = { result: graph.findWithStats(nodeId, maxDepth, maxNodes) };
+    const entry: CachedNodeRead = {
+      result: graph.findWithStats(nodeId, maxDepth, maxNodes),
+      revision: graph.revision,
+    };
     this.entries.set(key, entry);
     if (this.entries.size > this.maxEntries) {
       const oldest = this.entries.keys().next().value as string | undefined;
@@ -81,12 +91,5 @@ export class NormalizedNodeCache {
       evictions: this.evictions,
       normalizations: this.normalizations,
     };
-  }
-
-  private prepareRevision(revision: number): void {
-    if (this.revision === revision) return;
-    if (this.revision !== null && this.entries.size > 0) this.invalidations++;
-    this.entries.clear();
-    this.revision = revision;
   }
 }

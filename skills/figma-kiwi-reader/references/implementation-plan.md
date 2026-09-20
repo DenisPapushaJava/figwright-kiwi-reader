@@ -154,17 +154,27 @@ Status: node/depth truncation now returns an implementation `sectionPlan` before
 projection or any project scan. Complete implementation responses analyze the portable project
 profile once and reuse it across component, icon and token grounding. Response limits now measure
 serialized UTF-8 bytes, and an oversized design slice returns before any project scan. Repeated reads
-use a bounded per-session captured/normalized-subtree LRU cache; it invalidates conservatively on any
-scenegraph revision because instance masters may live outside the requested subtree. Fine-grained
-dependency-aware invalidation, a cheaper pre-normalization size estimate and the 65,662-node
-timing/memory baseline remain open.
+use a bounded per-session captured/normalized-subtree LRU cache. Each cache entry tracks the source
+nodes, parent layout context, component masters and component sets used to construct it. Incremental
+updates invalidate only entries intersecting the changed node's old or new ancestor chain; a bounded
+change history falls back to conservative rebuilding when an entry is too old. A cheaper
+pre-normalization size estimate and the 65,662-node timing/memory baseline remain open.
+
+A pre-change live baseline on the available 22,391-node file read a 1,838-node selected frame with
+626 resolved instances into a 977,472-byte UTF-8 response. Two sequential reads through the previously
+installed hub took 179 ms and 213 ms; its process used about 367 MB working set and 414 MB private
+memory. These are diagnostic samples from one Windows session, not a stable performance benchmark.
+With dependency-aware caching installed, the same response was byte-identical: the cold read took
+249 ms and the warm read 108 ms, while cache telemetry changed from one miss/normalization to one hit
+with no second normalization. The process then used about 361 MB working set and 333 MB private
+memory. These single samples validate the cache path; they do not establish a general speedup.
 
 - Reuse Figwright's node-count and response-size guard concepts.
 - Apply limits before constructing or JSON-stringifying a complete response.
 - Deduplicate repeated component instances while retaining text and visual overrides.
 - For an oversized root, return a section plan with child ids and estimated node counts.
 - Mark truncated depth/node results explicitly.
-- Cache normalized nodes and invalidate only changed nodes and affected ancestors.
+- Cache normalized nodes and invalidate only entries depending on changed nodes or affected ancestors.
 - Measure capture time, normalization time, memory, and output bytes on the proven 65,662-node file;
   establish limits from those measurements rather than guesses.
 

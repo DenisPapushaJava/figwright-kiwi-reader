@@ -55,6 +55,8 @@ unless current evidence requires a change; when that happens, update the plan wi
   Figma binding. Never infer missing component props when the result reports the portable name-only
   scan caveat.
 - After changes to `mcp` or `shared`, build before live testing because the server runs `dist`.
+- When changing scenegraph caching, preserve dependencies outside the requested subtree: parent layout
+  context, component masters, component sets, and both ancestor chains of a reparented node.
 - Run the repository's canonical root gates before completion: `corepack pnpm typecheck`, `lint`,
   `format:check`, `knip`, `build`, and `test`.
 

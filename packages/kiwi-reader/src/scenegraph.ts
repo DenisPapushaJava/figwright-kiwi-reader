@@ -39,6 +39,7 @@ export interface CapturedNode {
 
 export interface SceneGraphFindResult {
   node: CapturedNode | null;
+  dependencies: ReadonlySet<string>;
   visited: number;
   nodeLimitReached: boolean;
   depthLimitReached: boolean;
@@ -395,6 +396,10 @@ const instanceMasterId = (raw: KiwiNodeChange): string | null => {
 /** Incrementally merges the node changes already delivered to the authenticated Figma tab. */
 export class SceneGraphStore {
   private readonly nodes = new Map<string, KiwiNodeChange>();
+  private readonly changeHistory: Array<{
+    revision: number;
+    affectedNodeIds: ReadonlySet<string> | null;
+  }> = [];
   private currentRevision = 0;
 
   constructor(private readonly maxNodes = 250_000) {}
@@ -409,8 +414,29 @@ export class SceneGraphStore {
   }
 
   clear(): void {
-    if (this.nodes.size > 0) this.currentRevision++;
+    if (this.nodes.size > 0) {
+      this.currentRevision++;
+      this.recordChange(null);
+    }
     this.nodes.clear();
+  }
+
+  affectsDependenciesSince(revision: number, dependencies: ReadonlySet<string>): boolean {
+    if (revision >= this.currentRevision) return false;
+    const oldest = this.changeHistory[0];
+    if (oldest === undefined || revision < oldest.revision - 1) return true;
+    for (const change of this.changeHistory) {
+      if (change.revision <= revision) continue;
+      if (change.affectedNodeIds === null) return true;
+      const [smaller, larger] =
+        dependencies.size <= change.affectedNodeIds.size
+          ? [dependencies, change.affectedNodeIds]
+          : [change.affectedNodeIds, dependencies];
+      for (const id of smaller) {
+        if (larger.has(id)) return true;
+      }
+    }
+    return false;
   }
 
   apply(message: unknown): number {
@@ -428,16 +454,31 @@ export class SceneGraphStore {
     }
     if (projectedSize > this.maxNodes) throw new SceneGraphLimitError(this.maxNodes);
 
-    let applied = 0;
-    for (const change of message.nodeChanges) {
-      if (typeof change !== 'object' || change === null || change.guid === undefined) continue;
+    const validChanges = message.nodeChanges.filter(
+      (change): change is KiwiNodeChange =>
+        typeof change === 'object' && change !== null && change.guid !== undefined,
+    );
+    const affectedNodeIds = new Set<string>();
+    const oldExpandedAncestors = new Set<string>();
+    for (const change of validChanges) {
+      const id = nodeId(change.guid);
+      this.addAncestorChain(id, affectedNodeIds, oldExpandedAncestors);
+    }
+
+    for (const change of validChanges) {
       const id = nodeId(change.guid);
       if (isRemoved(change)) this.nodes.delete(id);
       else this.nodes.set(id, { ...this.nodes.get(id), ...change });
-      applied++;
     }
-    if (applied > 0) this.currentRevision++;
-    return applied;
+    if (validChanges.length > 0) {
+      const newExpandedAncestors = new Set<string>();
+      for (const change of validChanges) {
+        this.addAncestorChain(nodeId(change.guid), affectedNodeIds, newExpandedAncestors);
+      }
+      this.currentRevision++;
+      this.recordChange(affectedNodeIds);
+    }
+    return validChanges.length;
   }
 
   has(id: string): boolean {
@@ -450,9 +491,11 @@ export class SceneGraphStore {
 
   findWithStats(id: string, maxDepth = 8, maxNodes = 2_000): SceneGraphFindResult {
     const normalized = normalizeNodeId(id);
+    const dependencies = new Set<string>([normalized]);
     if (!this.nodes.has(normalized)) {
       return {
         node: null,
+        dependencies,
         visited: 0,
         nodeLimitReached: false,
         depthLimitReached: false,
@@ -491,6 +534,7 @@ export class SceneGraphStore {
     ): CapturedNode | null => {
       const sourceRaw = this.nodes.get(sourceId);
       if (sourceRaw === undefined) return null;
+      dependencies.add(sourceId);
       if (visited >= maxNodes) {
         nodeLimitReached = true;
         return null;
@@ -519,6 +563,7 @@ export class SceneGraphStore {
       if (raw.type === 'INSTANCE' && directChildren.length === 0) {
         const masterId = instanceMasterId(raw);
         if (masterId !== null) {
+          dependencies.add(masterId);
           const master = this.nodes.get(masterId);
           if (master === undefined) {
             unresolvedInstances++;
@@ -532,6 +577,7 @@ export class SceneGraphStore {
               master.parentIndex?.guid === undefined ? null : nodeId(master.parentIndex.guid);
             const componentSet =
               componentSetId === null ? undefined : this.nodes.get(componentSetId);
+            if (componentSetId !== null) dependencies.add(componentSetId);
             mainComponent = {
               id: masterId,
               name: master.name ?? '',
@@ -594,10 +640,10 @@ export class SceneGraphStore {
                 );
               })
               .filter((child): child is CapturedNode => child !== null);
-      const parentRaw =
-        raw.parentIndex?.guid === undefined
-          ? undefined
-          : this.nodes.get(nodeId(raw.parentIndex.guid));
+      const parentRawId =
+        raw.parentIndex?.guid === undefined ? undefined : nodeId(raw.parentIndex.guid);
+      const parentRaw = parentRawId === undefined ? undefined : this.nodes.get(parentRawId);
+      if (parentRawId !== undefined) dependencies.add(parentRawId);
       return {
         id: outputId,
         name: raw.name ?? '',
@@ -616,6 +662,7 @@ export class SceneGraphStore {
 
     return {
       node: build(normalized, normalized, 0),
+      dependencies,
       visited,
       nodeLimitReached,
       depthLimitReached,
@@ -623,6 +670,27 @@ export class SceneGraphStore {
       unresolvedInstances,
       instanceCycles,
     };
+  }
+
+  private addAncestorChain(id: string, output: Set<string>, expanded: Set<string>): void {
+    let current: string | null = id;
+    const seen = new Set<string>();
+    while (current !== null && !seen.has(current)) {
+      seen.add(current);
+      output.add(current);
+      if (expanded.has(current)) break;
+      expanded.add(current);
+      const parentGuid: KiwiGuid | undefined = this.nodes.get(current)?.parentIndex?.guid;
+      current = parentGuid === undefined ? null : nodeId(parentGuid);
+    }
+  }
+
+  private recordChange(affectedNodeIds: ReadonlySet<string> | null): void {
+    this.changeHistory.push({
+      revision: this.currentRevision,
+      affectedNodeIds: affectedNodeIds === null ? null : new Set(affectedNodeIds),
+    });
+    if (this.changeHistory.length > 256) this.changeHistory.shift();
   }
 }
 
