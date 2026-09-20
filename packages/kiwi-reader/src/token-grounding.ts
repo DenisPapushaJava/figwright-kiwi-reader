@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
 import {
   toHex,
@@ -9,13 +10,15 @@ import {
 
 import { truncationNote } from '../../mcp/src/repo-walk.js';
 import { normHex } from '../../mcp/src/tokens/hex.js';
+import { parseTailwindConfig, parseUnoConfig } from '../../mcp/src/tokens/js-config.js';
 import { aggregateRepoCssTokens } from '../../mcp/src/tokens/repo-css.js';
 import { aggregateRepoScssTokens } from '../../mcp/src/tokens/repo-scss.js';
 import { type ProjectToken, refOf } from '../../mcp/src/tokens/tokens.js';
 import { analyzePortableProject, type PortableProjectProfile } from './project-grounding.js';
 
 const MAX_CANDIDATES = 3;
-const SCAN_MODE = 'portable-css-scss' as const;
+const SCAN_MODE = 'portable-css-scss-js-config' as const;
+const JS_CONFIG_EXTENSION = /\.[cm]?[jt]s$/i;
 
 type ColorProperty =
   | 'fills'
@@ -80,6 +83,12 @@ interface ColorUsage {
 interface StyleUsage {
   slots: Set<StyleSlot>;
   nodeIds: Set<string>;
+}
+
+interface StaticConfigScan {
+  tokens: ProjectToken[];
+  files: string[];
+  caveats: string[];
 }
 
 const compare = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -206,6 +215,65 @@ const dedupeTokens = (tokens: readonly ProjectToken[]): ProjectToken[] => {
   });
 };
 
+/**
+ * Read framework theme scales without importing or executing the project's config. The full
+ * Figwright server and Kiwi use the same bounded static parser; runtime-only expressions stay
+ * visible as a caveat instead of being guessed.
+ */
+const scanStaticTokenConfig = async (
+  rootDir: string,
+  profile: PortableProjectProfile,
+): Promise<StaticConfigScan> => {
+  const { configPath, system } = profile.styling;
+  if (
+    configPath === undefined ||
+    !JS_CONFIG_EXTENSION.test(configPath) ||
+    (system !== 'tailwind' && system !== 'unocss')
+  ) {
+    return { tokens: [], files: [], caveats: [] };
+  }
+
+  let body: string;
+  try {
+    body = await readFile(join(rootDir, configPath), 'utf8');
+  } catch {
+    return {
+      tokens: [],
+      files: [],
+      caveats: [`The detected token config ${configPath} could not be read.`],
+    };
+  }
+
+  let parsed;
+  try {
+    parsed =
+      system === 'unocss'
+        ? parseUnoConfig(configPath, body)
+        : parseTailwindConfig(configPath, body);
+  } catch {
+    return {
+      tokens: [],
+      files: [configPath],
+      caveats: [`The detected token config ${configPath} could not be parsed statically.`],
+    };
+  }
+
+  const caveats = [
+    'JavaScript and TypeScript token configs are parsed statically and never executed; runtime-only values are omitted.',
+  ];
+  if (!parsed.themeFound) {
+    caveats.push(
+      `${configPath} has no statically reachable theme object; its theme may be built at runtime or live in a preset or shared package.`,
+    );
+  }
+  if (parsed.skipped > 0) {
+    caveats.push(
+      `${parsed.skipped} theme entr(ies) from ${configPath} were skipped because they use an imported spread, computed key, or function value.`,
+    );
+  }
+  return { tokens: parsed.tokens, files: [configPath], caveats };
+};
+
 const candidateFrom = (token: ProjectToken, utilityFirst: boolean): KiwiTokenCandidate => ({
   token: token.name,
   ref: refOf(token, utilityFirst),
@@ -217,8 +285,8 @@ const candidateFrom = (token: ProjectToken, utilityFirst: boolean): KiwiTokenCan
 });
 
 /**
- * Join colors actually observed in the captured subtree to portable CSS/SCSS project tokens. Kiwi
- * does not expose variable or shared-style names, so this deliberately performs no name join.
+ * Join colors actually observed in the captured subtree to portable project tokens. Kiwi does not
+ * expose variable or shared-style names, so this deliberately performs no name join.
  */
 export const mapProjectTokens = async (input: {
   roots: readonly DesignContextNode[];
@@ -227,12 +295,22 @@ export const mapProjectTokens = async (input: {
   profile?: PortableProjectProfile;
 }): Promise<KiwiTokenMapResult> => {
   const rootDir = resolve(input.rootDir);
-  const [profile, css, scss] = await Promise.all([
-    input.profile ?? analyzePortableProject(rootDir),
+  const profile = input.profile ?? (await analyzePortableProject(rootDir));
+  const [css, scss, config] = await Promise.all([
     aggregateRepoCssTokens(rootDir),
     aggregateRepoScssTokens(rootDir),
+    scanStaticTokenConfig(rootDir, profile),
   ]);
-  const projectTokens = dedupeTokens([...scss.tokens, ...css.tokens]);
+  // A framework config and a generated CSS/SCSS mirror can carry the same semantic declaration.
+  // Prefer the config's real utility reference for an identical name+value pair; different names or
+  // values remain separate candidates, preserving genuine aliases and light/dark variants.
+  const configDeclarations = new Set(
+    config.tokens.map(token => `${token.name}\u0000${token.value}`),
+  );
+  const mirroredTokens = [...scss.tokens, ...css.tokens].filter(
+    token => !configDeclarations.has(`${token.name}\u0000${token.value}`),
+  );
+  const projectTokens = dedupeTokens([...config.tokens, ...mirroredTokens]);
   const utilityFirst = profile.styling.system === 'tailwind' || profile.styling.system === 'unocss';
   const projectByValue = new Map<string, ProjectToken[]>();
   for (const token of projectTokens) {
@@ -300,13 +378,13 @@ export const mapProjectTokens = async (input: {
     unresolvedStyleRefs,
     profile,
     projectTokenCount: projectTokens.length,
-    tokenFiles: [...new Set([...css.files, ...scss.files])].toSorted(compare),
+    tokenFiles: [...new Set([...config.files, ...css.files, ...scss.files])].toSorted(compare),
     scanMode: SCAN_MODE,
     variableBindings: 'unavailable',
     caveats: [
       'Matches use exact color-value equality only. They are reuse candidates, not proven Figma variable bindings.',
       'Captured shared-style ids are opaque: Kiwi exposes stable ids but not their Figma names or definitions.',
-      'The portable scan reads CSS custom properties and SCSS variables; JavaScript and TypeScript token configs are not evaluated.',
+      ...config.caveats,
       ...(input.captureCaveats ?? []),
     ],
     ...(omitted === 0 ? {} : { truncationNote: truncationNote('stylesheet files', omitted) }),

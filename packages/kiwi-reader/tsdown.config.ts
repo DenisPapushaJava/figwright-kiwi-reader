@@ -4,7 +4,7 @@ import { defineConfig } from 'tsdown';
 // Keep them declared on Kiwi Reader and bundled here so the release remains standalone; knip cannot
 // attribute a dependency imported across a workspace source boundary, so knip.json records the pair.
 const standaloneDependencies =
-  /^(?:@figwright\/shared|@modelcontextprotocol\/(?:server|core)|fdir|fzstd|ignore|kiwi-schema|ws|zod)(?:\/.*)?$/;
+  /^(?:@babel\/parser|@figwright\/shared|@modelcontextprotocol\/(?:server|core)|fdir|fzstd|ignore|kiwi-schema|ws|zod)(?:\/.*)?$/;
 
 export default defineConfig({
   entry: [

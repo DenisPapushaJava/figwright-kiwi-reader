@@ -408,7 +408,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         mappings: [],
         projectTokenCount: 1,
         tokenFiles: ['tokens.css'],
-        scanMode: 'portable-css-scss',
+        scanMode: 'portable-css-scss-js-config',
         variableBindings: 'unavailable',
       });
 
@@ -436,7 +436,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           profile: { framework: 'react' },
           scanModes: {
             components: 'portable-name-only',
-            tokens: 'portable-css-scss',
+            tokens: 'portable-css-scss-js-config',
           },
         },
         grounding: {
