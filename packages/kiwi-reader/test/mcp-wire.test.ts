@@ -423,7 +423,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       const truncatedImplementationContext = parseToolText(
         await send('tools/call', {
           name: 'get_implementation_context',
-          arguments: { nodeId: '6:140', depth: 0, rootDir: assetDirectory },
+          arguments: { nodeId: '6:140', depth: 0, rootDir: '\0' },
         }),
       );
       expect(truncatedImplementationContext).toMatchObject({
@@ -435,8 +435,12 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           totalNodes: 3,
           sections: [{ nodeId: '6:141' }, { nodeId: '6:142' }],
         },
+        capture: { visited: 1, truncated: true },
+        deferred: ['design', 'assets', 'project', 'grounding'],
         note: expect.stringContaining('get_implementation_context'),
       });
+      expect(truncatedImplementationContext).not.toHaveProperty('project');
+      expect(truncatedImplementationContext).not.toHaveProperty('groundingSummary');
 
       const saved = parseToolText(
         await send('tools/call', {
@@ -563,6 +567,8 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         schemaVersion: 'figwright-kiwi-implementation@1',
         designSchemaVersion: 'figwright-kiwi-context@1',
         sectionPlan: { sectionsTruncated: true, omittedSections: 1_799 },
+        capture: { truncated: true },
+        deferred: ['design', 'assets', 'project', 'grounding'],
         note: expect.stringContaining('get_implementation_context'),
       });
     } finally {

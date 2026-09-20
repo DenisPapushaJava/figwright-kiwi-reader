@@ -224,10 +224,11 @@ export const mapProjectTokens = async (input: {
   roots: readonly DesignContextNode[];
   rootDir: string;
   captureCaveats?: readonly string[];
+  profile?: PortableProjectProfile;
 }): Promise<KiwiTokenMapResult> => {
   const rootDir = resolve(input.rootDir);
   const [profile, css, scss] = await Promise.all([
-    analyzePortableProject(rootDir),
+    input.profile ?? analyzePortableProject(rootDir),
     aggregateRepoCssTokens(rootDir),
     aggregateRepoScssTokens(rootDir),
   ]);

@@ -84,6 +84,27 @@ describe('portable Kiwi project grounding', () => {
     expect(scan.profile.caveats.join(' ')).toContain('Prop coverage is intentionally unknown');
   });
 
+  it('reuses one verified project profile across combined grounding scans', async () => {
+    const rootDir = await projectFixture();
+    const profile = await analyzePortableProject(rootDir);
+    await writeFile(
+      join(rootDir, 'package.json'),
+      JSON.stringify({ dependencies: { vue: '^3.0.0' } }),
+      'utf8',
+    );
+
+    const [components, icons, tokens] = await Promise.all([
+      mapProjectComponents({ roots: [], rootDir, profile }),
+      mapProjectIcons({ roots: [], rootDir, profile }),
+      mapProjectTokens({ roots: [], rootDir, profile }),
+    ]);
+
+    expect(components.profile).toBe(profile);
+    expect(icons.profile).toBe(profile);
+    expect(tokens.profile).toBe(profile);
+    expect(profile.framework).toBe('react');
+  });
+
   it('maps Kiwi component instances to project components without inventing prop gaps', async () => {
     const rootDir = await projectFixture();
     const design: DesignContextNode = {
