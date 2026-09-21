@@ -348,6 +348,10 @@ const projectionBudgetReason = (
 const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel) => {
   const projected = projectNode(normalizedPickedNode(result), detail);
   const assets = designAssets(result.captured, result.session);
+  const variables = result.stats.variables;
+  const variableCount = Object.keys(variables).length;
+  const styles = result.stats.styles;
+  const styleCount = Object.keys(styles).length;
   return {
     schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
     nodes: [projected],
@@ -372,12 +376,39 @@ const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel)
             ? 'exportable'
             : 'partially-exportable',
       mixedTextRuns: 'style-overrides',
-      variables: 'unsupported',
+      sharedStyles:
+        result.stats.sharedStyleBindings === 0
+          ? 'not-present'
+          : result.stats.unresolvedSharedStyles === 0
+            ? 'resolved'
+            : result.stats.resolvedSharedStyles === 0
+              ? 'unresolved'
+              : 'partially-resolved',
+      variables:
+        result.stats.variableColorBindings === 0
+          ? 'not-present'
+          : result.stats.unresolvedVariableColors === 0
+            ? 'color-bindings-resolved'
+            : result.stats.resolvedVariableColors === 0
+              ? 'color-bindings-unresolved'
+              : 'color-bindings-partially-resolved',
       visualReference: 'not-captured',
     },
     assets,
+    ...(variableCount === 0 ? {} : { variables }),
+    ...(styleCount === 0 ? {} : { styles }),
     caveats: [
-      'Variables and mixed-text links, lists, and per-run bindings are not resolved yet.',
+      'Non-color variables and mixed-text links, lists, and scalar per-run bindings are not resolved yet.',
+      ...(result.stats.unresolvedVariableColors === 0
+        ? []
+        : [
+            `${result.stats.unresolvedVariableColors} color variable binding(s) kept their captured fallback because the variable, mode, or alias target was unavailable.`,
+          ]),
+      ...(result.stats.unresolvedSharedStyles === 0
+        ? []
+        : [
+            `${result.stats.unresolvedSharedStyles} shared visual style binding(s) kept their captured fallback because the style definition was unavailable.`,
+          ]),
       'When Kiwi exposes an instance swap only as an overridden symbol id, the swapped component tree is resolved but its component-property definition name is unavailable.',
       ...rasterAssetCaveats(assets.summary, result.session.captureImages),
       ...(result.stats.unresolvedInstances === 0

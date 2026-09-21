@@ -49,6 +49,15 @@ const rgba = (value: unknown): { r: number; g: number; b: number; a: number } | 
   return { ...rgb, a: finiteNumber(source?.a) ?? 1 };
 };
 
+const normalizeObjectBindings = (value: unknown): Readonly<Record<string, string>> | undefined => {
+  const source = record(value);
+  if (source === null) return undefined;
+  const entries = Object.entries(source).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== '',
+  );
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+};
+
 const matrix = (value: unknown): number[][] | undefined => {
   if (Array.isArray(value)) {
     const rows = value.map(numericArray);
@@ -69,10 +78,18 @@ const normalizePaint = (value: unknown): SerializedPaint | null => {
   const type = nonEmptyString(source?.type);
   if (source === null || type === undefined) return null;
   const base = { visible: source.visible !== false, opacity: finiteNumber(source.opacity) ?? 1 };
+  const boundVariables = normalizeObjectBindings(source.boundVariables);
 
   if (type === 'SOLID') {
     const paintColor = color(source.color ?? source.authoredColor);
-    return paintColor === undefined ? null : { type, ...base, color: paintColor };
+    return paintColor === undefined
+      ? null
+      : {
+          type,
+          ...base,
+          color: paintColor,
+          ...(boundVariables === undefined ? {} : { boundVariables }),
+        };
   }
 
   if (
@@ -82,15 +99,22 @@ const normalizePaint = (value: unknown): SerializedPaint | null => {
     type === 'GRADIENT_DIAMOND'
   ) {
     const transform = matrix(source.gradientTransform ?? source.transform);
-    if (transform === undefined || !Array.isArray(source.gradientStops)) return null;
-    const gradientStops = source.gradientStops
+    const sourceStops = source.gradientStops ?? source.stopsVar ?? source.stops;
+    if (transform === undefined || !Array.isArray(sourceStops)) return null;
+    const gradientStops = sourceStops
       .map(stop => {
         const raw = record(stop);
         const position = finiteNumber(raw?.position);
         const stopColor = rgba(raw?.color);
-        return position === undefined || stopColor === undefined
-          ? null
-          : { position, color: stopColor };
+        const stopBindings = normalizeObjectBindings(raw?.boundVariables);
+        if (position === undefined || stopColor === undefined) return null;
+        const output: {
+          position: number;
+          color: { r: number; g: number; b: number; a: number };
+          boundVariables?: Readonly<Record<string, string>>;
+        } = { position, color: stopColor };
+        if (stopBindings !== undefined) output.boundVariables = stopBindings;
+        return output;
       })
       .filter(
         (
@@ -100,7 +124,13 @@ const normalizePaint = (value: unknown): SerializedPaint | null => {
           color: { r: number; g: number; b: number; a: number };
         } => stop !== null,
       );
-    return { type, ...base, gradientStops, gradientTransform: transform };
+    return {
+      type,
+      ...base,
+      gradientStops,
+      gradientTransform: transform,
+      ...(boundVariables === undefined ? {} : { boundVariables }),
+    };
   }
 
   if (type === 'IMAGE' || type === 'VIDEO') {
@@ -140,6 +170,7 @@ const normalizeEffects = (value: unknown): SerializedEffect[] | undefined => {
     const type = nonEmptyString(source?.type);
     if (source === null || type === undefined) return [];
     const output: SerializedEffect = { type, visible: source.visible !== false };
+    const boundVariables = normalizeObjectBindings(source.boundVariables);
     const radius = finiteNumber(source.radius);
     const spread = finiteNumber(source.spread);
     const effectColor = rgba(source.color);
@@ -150,6 +181,7 @@ const normalizeEffects = (value: unknown): SerializedEffect[] | undefined => {
     if (spread !== undefined) output.spread = spread;
     if (effectColor !== undefined) output.color = effectColor;
     if (offsetX !== undefined && offsetY !== undefined) output.offset = { x: offsetX, y: offsetY };
+    if (boundVariables !== undefined) output.boundVariables = boundVariables;
     return [output];
   });
 };
@@ -214,14 +246,24 @@ const normalizeLetterSpacing = (value: unknown): SerializedLetterSpacing | undef
     : { unit, value: numericValue };
 };
 
-const assetKey = (value: unknown): string | undefined => nonEmptyString(record(value)?.key);
+const assetKey = (value: unknown): string | undefined => {
+  const source = record(value);
+  return nonEmptyString(source?.key) ?? nonEmptyString(record(source?.assetRef)?.key);
+};
+
+const styleReferenceId = (value: unknown): string | undefined => {
+  const key = assetKey(value);
+  if (key !== undefined) return key;
+  const guid = record(record(value)?.guid) as KiwiGuid | null;
+  return guid === null ? undefined : `StyleID:${nodeId(guid)}`;
+};
 
 const normalizeStyleIds = (raw: UnknownRecord): SerializedStyleIds | undefined => {
   const output: SerializedStyleIds = {};
-  const fill = assetKey(raw.styleIdForFill);
-  const stroke = assetKey(raw.styleIdForStrokeFill);
-  const effect = assetKey(raw.styleIdForEffect);
-  const text = assetKey(raw.styleIdForText);
+  const fill = styleReferenceId(raw.styleIdForFill);
+  const stroke = styleReferenceId(raw.styleIdForStrokeFill);
+  const effect = styleReferenceId(raw.styleIdForEffect);
+  const text = styleReferenceId(raw.styleIdForText);
   if (fill !== undefined) output.fill = fill;
   if (stroke !== undefined) output.stroke = stroke;
   if (effect !== undefined) output.effect = effect;

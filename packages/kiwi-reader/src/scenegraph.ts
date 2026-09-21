@@ -1,3 +1,21 @@
+import {
+  buildSharedStyleIndex,
+  hasSharedStyleDefinitionChange,
+  SHARED_STYLE_GRAPH_DEPENDENCY,
+  SharedStyleResolver,
+  type ResolvedKiwiStyle,
+  type SharedStyleIndex,
+} from './shared-styles.js';
+import {
+  buildVariableColorIndex,
+  hasVariableDefinitionChange,
+  VARIABLE_GRAPH_DEPENDENCY,
+  VariableColorResolver,
+  type ResolvedKiwiVariable,
+  type VariableColorIndex,
+  type VariableModeMap,
+} from './variable-colors.js';
+
 export interface KiwiGuid {
   sessionID?: number;
   localID?: number;
@@ -46,6 +64,15 @@ export interface SceneGraphFindResult {
   resolvedInstances: number;
   unresolvedInstances: number;
   instanceCycles: number;
+  variableColorBindings: number;
+  resolvedVariableColors: number;
+  unresolvedVariableColors: number;
+  variableModeFallbacks: number;
+  variables: Readonly<Record<string, ResolvedKiwiVariable>>;
+  sharedStyleBindings: number;
+  resolvedSharedStyles: number;
+  unresolvedSharedStyles: number;
+  styles: Readonly<Record<string, ResolvedKiwiStyle>>;
 }
 
 export interface SceneGraphSectionOutline {
@@ -403,6 +430,8 @@ const instanceMasterId = (raw: KiwiNodeChange): string | null => {
 /** Incrementally merges the node changes already delivered to the authenticated Figma tab. */
 export class SceneGraphStore {
   private readonly nodes = new Map<string, KiwiNodeChange>();
+  private variableColorIndex: VariableColorIndex | null = null;
+  private sharedStyleIndex: SharedStyleIndex | null = null;
   private readonly changeHistory: Array<{
     revision: number;
     affectedNodeIds: ReadonlySet<string> | null;
@@ -426,6 +455,8 @@ export class SceneGraphStore {
       this.recordChange(null);
     }
     this.nodes.clear();
+    this.variableColorIndex = null;
+    this.sharedStyleIndex = null;
   }
 
   affectsDependenciesSince(revision: number, dependencies: ReadonlySet<string>): boolean {
@@ -466,9 +497,17 @@ export class SceneGraphStore {
         typeof change === 'object' && change !== null && change.guid !== undefined,
     );
     const affectedNodeIds = new Set<string>();
+    let variableDefinitionsChanged = false;
+    let sharedStyleDefinitionsChanged = false;
     const oldExpandedAncestors = new Set<string>();
     for (const change of validChanges) {
       const id = nodeId(change.guid);
+      if (hasVariableDefinitionChange(this.nodes.get(id), change)) {
+        variableDefinitionsChanged = true;
+      }
+      if (hasSharedStyleDefinitionChange(this.nodes.get(id), change)) {
+        sharedStyleDefinitionsChanged = true;
+      }
       this.addAncestorChain(id, affectedNodeIds, oldExpandedAncestors);
     }
 
@@ -478,6 +517,14 @@ export class SceneGraphStore {
       else this.nodes.set(id, { ...this.nodes.get(id), ...change });
     }
     if (validChanges.length > 0) {
+      if (variableDefinitionsChanged) {
+        this.variableColorIndex = null;
+        affectedNodeIds.add(VARIABLE_GRAPH_DEPENDENCY);
+      }
+      if (sharedStyleDefinitionsChanged) {
+        this.sharedStyleIndex = null;
+        affectedNodeIds.add(SHARED_STYLE_GRAPH_DEPENDENCY);
+      }
       const newExpandedAncestors = new Set<string>();
       for (const change of validChanges) {
         this.addAncestorChain(nodeId(change.guid), affectedNodeIds, newExpandedAncestors);
@@ -553,6 +600,15 @@ export class SceneGraphStore {
         resolvedInstances: 0,
         unresolvedInstances: 0,
         instanceCycles: 0,
+        variableColorBindings: 0,
+        resolvedVariableColors: 0,
+        unresolvedVariableColors: 0,
+        variableModeFallbacks: 0,
+        variables: {},
+        sharedStyleBindings: 0,
+        resolvedSharedStyles: 0,
+        unresolvedSharedStyles: 0,
+        styles: {},
       };
     }
 
@@ -564,6 +620,13 @@ export class SceneGraphStore {
     let resolvedInstances = 0;
     let unresolvedInstances = 0;
     let instanceCycles = 0;
+    const sharedStyleResolver = new SharedStyleResolver(this.getSharedStyleIndex());
+    const variableResolver = new VariableColorResolver(this.getVariableColorIndex());
+    const rootVariableModes = this.inheritedVariableModes(
+      normalized,
+      dependencies,
+      variableResolver,
+    );
 
     const build = (
       sourceId: string,
@@ -572,6 +635,7 @@ export class SceneGraphStore {
       resolvedParentId?: string,
       context?: InstanceOverrideContext,
       parentStackMode?: string,
+      inheritedVariableModes: VariableModeMap = new Map(),
     ): CapturedNode | null => {
       const sourceRaw = this.nodes.get(sourceId);
       if (sourceRaw === undefined) return null;
@@ -594,6 +658,13 @@ export class SceneGraphStore {
       const override =
         context === undefined ? null : findOverride(context.overrides, context.prefix, fullPath);
       if (override !== null) raw = mergeRecords(raw, override) as KiwiNodeChange;
+      const styleResolution = sharedStyleResolver.resolveNode(raw);
+      raw = styleResolution.raw;
+      if (styleResolution.usesStyles) dependencies.add(SHARED_STYLE_GRAPH_DEPENDENCY);
+      const variableResolution = variableResolver.resolveNode(raw, inheritedVariableModes);
+      raw = variableResolution.raw;
+      if (variableResolution.usesVariables) dependencies.add(VARIABLE_GRAPH_DEPENDENCY);
+      let childVariableModes = variableResolution.modes;
 
       const directChildren = childIds.get(sourceId) ?? [];
       let sourceChildren = directChildren;
@@ -639,6 +710,10 @@ export class SceneGraphStore {
                 : {}),
             };
             sourceChildren = childIds.get(masterId) ?? [];
+            // A master can establish a default collection mode, while the placed instance and its
+            // ancestors remain authoritative at the usage site.
+            const masterModes = variableResolver.modesFor(master);
+            childVariableModes = new Map([...masterModes, ...variableResolution.modes]);
             const inheritedOverrides = new Map(context?.overrides ?? []);
             const prefix = context === undefined ? [] : [...context.prefix, segment];
             addInstanceOverrides(inheritedOverrides, prefix, raw);
@@ -678,6 +753,7 @@ export class SceneGraphStore {
                   outputId,
                   nextContext,
                   typeof raw.stackMode === 'string' ? raw.stackMode : undefined,
+                  childVariableModes,
                 );
               })
               .filter((child): child is CapturedNode => child !== null);
@@ -702,7 +778,7 @@ export class SceneGraphStore {
     };
 
     return {
-      node: build(normalized, normalized, 0),
+      node: build(normalized, normalized, 0, undefined, undefined, undefined, rootVariableModes),
       dependencies,
       visited,
       nodeLimitReached,
@@ -710,7 +786,49 @@ export class SceneGraphStore {
       resolvedInstances,
       unresolvedInstances,
       instanceCycles,
+      variableColorBindings: variableResolver.stats.bindings,
+      resolvedVariableColors: variableResolver.stats.resolved,
+      unresolvedVariableColors: variableResolver.stats.unresolved,
+      variableModeFallbacks: variableResolver.stats.modeFallbacks,
+      variables: variableResolver.variables,
+      sharedStyleBindings: sharedStyleResolver.stats.bindings,
+      resolvedSharedStyles: sharedStyleResolver.stats.resolved,
+      unresolvedSharedStyles: sharedStyleResolver.stats.unresolved,
+      styles: sharedStyleResolver.styles,
     };
+  }
+
+  private getSharedStyleIndex(): SharedStyleIndex {
+    this.sharedStyleIndex ??= buildSharedStyleIndex(this.nodes.values());
+    return this.sharedStyleIndex;
+  }
+
+  private getVariableColorIndex(): VariableColorIndex {
+    this.variableColorIndex ??= buildVariableColorIndex(this.nodes.values());
+    return this.variableColorIndex;
+  }
+
+  private inheritedVariableModes(
+    id: string,
+    dependencies: Set<string>,
+    resolver: VariableColorResolver,
+  ): VariableModeMap {
+    const ancestors: KiwiNodeChange[] = [];
+    let parentGuid = this.nodes.get(id)?.parentIndex?.guid;
+    const seen = new Set<string>();
+    while (parentGuid !== undefined) {
+      const parentId = nodeId(parentGuid);
+      if (seen.has(parentId)) break;
+      seen.add(parentId);
+      dependencies.add(parentId);
+      const parent = this.nodes.get(parentId);
+      if (parent === undefined) break;
+      ancestors.push(parent);
+      parentGuid = parent.parentIndex?.guid;
+    }
+    let modes: VariableModeMap = new Map();
+    for (const ancestor of ancestors.toReversed()) modes = resolver.modesFor(ancestor, modes);
+    return modes;
   }
 
   private buildChildIndex(): Map<string, Array<{ id: string; position: string }>> {
