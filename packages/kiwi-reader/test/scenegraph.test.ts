@@ -30,6 +30,55 @@ describe('SceneGraphStore', () => {
     expect(root?.children.map(child => child.name)).toEqual(['First', 'Second']);
   });
 
+  it('updates the shared child index after reordering, reparenting, and clearing the graph', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 1, localID: 1 }, name: 'First frame', type: 'FRAME' },
+        { guid: { sessionID: 1, localID: 2 }, name: 'Second frame', type: 'FRAME' },
+        {
+          guid: { sessionID: 1, localID: 3 },
+          name: 'A',
+          parentIndex: { guid: { sessionID: 1, localID: 1 }, position: 'a' },
+        },
+        {
+          guid: { sessionID: 1, localID: 4 },
+          name: 'B',
+          parentIndex: { guid: { sessionID: 1, localID: 1 }, position: 'b' },
+        },
+      ],
+    });
+    expect(graph.find('1:1')?.children.map(child => child.name)).toEqual(['A', 'B']);
+    expect(graph.sectionOutline('1:1', 10)?.totalSections).toBe(2);
+
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 1, localID: 4 },
+          parentIndex: { guid: { sessionID: 1, localID: 1 }, position: '0' },
+        },
+      ],
+    });
+    expect(graph.find('1:1')?.children.map(child => child.name)).toEqual(['B', 'A']);
+
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 1, localID: 4 },
+          parentIndex: { guid: { sessionID: 1, localID: 2 }, position: 'a' },
+        },
+      ],
+    });
+    expect(graph.sectionOutline('1:1', 10)?.totalSections).toBe(1);
+    expect(graph.find('1:2')?.children.map(child => child.name)).toEqual(['B']);
+
+    graph.clear();
+    graph.apply({
+      nodeChanges: [{ guid: { sessionID: 1, localID: 1 }, name: 'Empty', type: 'FRAME' }],
+    });
+    expect(graph.find('1:1')?.children).toEqual([]);
+  });
+
   it('uses deterministic code-point ordering and exposes the parent stack direction', () => {
     const graph = new SceneGraphStore();
     graph.apply({
