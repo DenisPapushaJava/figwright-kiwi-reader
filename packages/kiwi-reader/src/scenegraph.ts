@@ -430,6 +430,7 @@ const instanceMasterId = (raw: KiwiNodeChange): string | null => {
 /** Incrementally merges the node changes already delivered to the authenticated Figma tab. */
 export class SceneGraphStore {
   private readonly nodes = new Map<string, KiwiNodeChange>();
+  private childIndex: Map<string, Array<{ id: string; position: string }>> | null = null;
   private variableColorIndex: VariableColorIndex | null = null;
   private sharedStyleIndex: SharedStyleIndex | null = null;
   private readonly changeHistory: Array<{
@@ -455,6 +456,7 @@ export class SceneGraphStore {
       this.recordChange(null);
     }
     this.nodes.clear();
+    this.childIndex = null;
     this.variableColorIndex = null;
     this.sharedStyleIndex = null;
   }
@@ -517,6 +519,7 @@ export class SceneGraphStore {
       else this.nodes.set(id, { ...this.nodes.get(id), ...change });
     }
     if (validChanges.length > 0) {
+      this.childIndex = null;
       if (variableDefinitionsChanged) {
         this.variableColorIndex = null;
         affectedNodeIds.add(VARIABLE_GRAPH_DEPENDENCY);
@@ -832,6 +835,7 @@ export class SceneGraphStore {
   }
 
   private buildChildIndex(): Map<string, Array<{ id: string; position: string }>> {
+    if (this.childIndex !== null) return this.childIndex;
     const childIds = new Map<string, Array<{ id: string; position: string }>>();
     for (const [childId, node] of this.nodes) {
       if (node.parentIndex?.guid === undefined) continue;
@@ -843,6 +847,7 @@ export class SceneGraphStore {
     for (const children of childIds.values()) {
       children.sort((a, b) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0));
     }
+    this.childIndex = childIds;
     return childIds;
   }
 
