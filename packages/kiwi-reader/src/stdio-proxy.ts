@@ -88,14 +88,7 @@ const writeError = (request: JsonRpcMessage, error: unknown): void => {
   );
 };
 
-const forward = async (line: string): Promise<void> => {
-  let request: JsonRpcMessage;
-  try {
-    request = JSON.parse(line) as JsonRpcMessage;
-  } catch (error) {
-    console.error(`[figwright-kiwi] invalid stdio JSON: ${String(error)}`);
-    return;
-  }
+const forward = async (request: JsonRpcMessage, line: string): Promise<void> => {
   if (request.method === 'initialize' && typeof request.params?.protocolVersion === 'string') {
     protocolVersion = request.params.protocolVersion;
   }
@@ -119,9 +112,29 @@ const forward = async (line: string): Promise<void> => {
 };
 
 const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+const inFlight = new Set<Promise<void>>();
 for await (const line of input) {
-  if (line.trim() !== '') await forward(line);
+  if (line.trim() === '') continue;
+  let request: JsonRpcMessage;
+  try {
+    request = JSON.parse(line) as JsonRpcMessage;
+    if (typeof request !== 'object' || request === null) throw new Error('Expected an object');
+  } catch (error) {
+    console.error(`[figwright-kiwi] invalid stdio JSON: ${String(error)}`);
+    continue;
+  }
+  if (request.method !== 'tools/call') {
+    // Preserve initialization and notification ordering around tool calls.
+    await Promise.all(inFlight);
+    await forward(request, line);
+    continue;
+  }
+  let call: Promise<void>;
+  call = forward(request, line).finally(() => inFlight.delete(call));
+  inFlight.add(call);
+  if (inFlight.size >= 8) await Promise.race(inFlight);
 }
+await Promise.all(inFlight);
 
 const childHub = launchedHub as ChildProcess | null;
 if (!persistHub && childHub !== null && childHub.exitCode === null) childHub.kill('SIGTERM');

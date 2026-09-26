@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 
@@ -112,4 +113,41 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi stdio-to-hub proxy (built dist)',
       await closeProxy(first.child);
     }
   }, 30_000);
+
+  it('lets a quick tool call finish while another call is still running', async () => {
+    const hub = createHttpServer((request, response) => {
+      if (request.url === '/health') {
+        response.writeHead(200, { 'content-type': 'application/json' });
+        response.end('{"ok":true}');
+        return;
+      }
+      void (async () => {
+        let body = '';
+        for await (const chunk of request) body += String(chunk);
+        const message = JSON.parse(body) as { id: number; params?: { name?: string } };
+        const delay = message.params?.name === 'slow' ? 200 : 0;
+        setTimeout(() => {
+          response.writeHead(200, { 'content-type': 'application/json' });
+          response.end(JSON.stringify({ jsonrpc: '2.0', id: message.id, result: {} }));
+        }, delay);
+      })();
+    });
+    await new Promise<void>((resolve, reject) => {
+      hub.once('error', reject);
+      hub.listen(0, '127.0.0.1', resolve);
+    });
+    const address = hub.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected a TCP address');
+    const client = proxyClient(await freePort(), address.port);
+    try {
+      await client.send('initialize', { protocolVersion: '2025-11-25' });
+      const slow = client.send('tools/call', { name: 'slow' }).then(() => 'slow');
+      const fast = client.send('tools/call', { name: 'fast' }).then(() => 'fast');
+      expect(await Promise.race([slow, fast])).toBe('fast');
+      await Promise.all([slow, fast]);
+    } finally {
+      await closeProxy(client.child);
+      await new Promise<void>(resolve => hub.close(() => resolve()));
+    }
+  });
 });
