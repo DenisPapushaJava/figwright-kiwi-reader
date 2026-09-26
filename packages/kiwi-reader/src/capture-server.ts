@@ -372,7 +372,7 @@ export class KiwiCaptureServer extends EventEmitter {
 
   get status(): CaptureStatus {
     return {
-      connected: this.socket?.readyState === this.socket?.OPEN,
+      connected: this.socket !== null && this.socket.readyState === this.socket.OPEN,
       sessions: this.listSessions().map(session => session.status),
     };
   }
@@ -408,9 +408,7 @@ export class KiwiCaptureServer extends EventEmitter {
     this.server = null;
     this.socket?.close(1000, 'Server stopped');
     this.socket = null;
-    this.clearStatusTimers();
-    this.rejectReferenceRequests(new Error('Capture server stopped'));
-    for (const session of this.sessionMap.values()) session.connected = false;
+    this.clearSessions(new Error('Capture server stopped'));
     this.emit('stopped');
     if (server === null) return;
     await new Promise<void>(resolve => server.close(() => resolve()));
@@ -483,10 +481,14 @@ export class KiwiCaptureServer extends EventEmitter {
 
   private bind(socket: WebSocket): void {
     this.socket?.close(4000, 'Replaced by a newer browser connection');
+    // A new connection must describe its own tabs. Keeping the previous graph here would let an
+    // empty or partially restored extension expose stale designs as if they were still captured.
+    this.clearSessions(new Error('Browser extension connection replaced'));
     this.socket = socket;
     this.emit('status', this.status);
 
     socket.on('message', data => {
+      if (this.socket !== socket) return;
       if (!Buffer.isBuffer(data)) return;
       const message = parseMessage(data);
       if (message === null || message.type === 'ping') return;
@@ -544,11 +546,15 @@ export class KiwiCaptureServer extends EventEmitter {
     socket.on('close', () => {
       if (this.socket !== socket) return;
       this.socket = null;
-      this.clearStatusTimers();
-      this.rejectReferenceRequests(new Error('Browser extension disconnected'));
-      for (const session of this.sessionMap.values()) session.connected = false;
+      this.clearSessions(new Error('Browser extension disconnected'));
       this.emit('status', this.status);
     });
+  }
+
+  private clearSessions(error: Error): void {
+    this.clearStatusTimers();
+    this.rejectReferenceRequests(error);
+    this.sessionMap.clear();
   }
 
   private removeSession(tabId: number): void {

@@ -220,6 +220,10 @@ const resyncAttachedTabs = async () => {
   await Promise.all(
     [...attachedTabs].map(async tabId => {
       try {
+        // sendHello resets the server's capture. Start a fresh image request/deduplication window
+        // as well, or URLs already sent before the disconnect disappear from the new capture.
+        imageRequests.set(tabId, new Map());
+        sentImageUrls.set(tabId, new Set());
         await publishState(tabId, {
           bridgeConnected: true,
           phase: 'reloading',
