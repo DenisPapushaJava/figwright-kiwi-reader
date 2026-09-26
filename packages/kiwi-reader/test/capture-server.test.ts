@@ -215,6 +215,62 @@ describe('KiwiCaptureServer', () => {
     socket.close();
   });
 
+  it('discards captured tabs when the extension connection is replaced or closed', async () => {
+    const { messagePayload, schemaPayload } = fixtureFrames();
+    const server = new KiwiCaptureServer({ port: 0 });
+    servers.push(server);
+    const port = await server.start();
+    expect(server.status.connected).toBe(false);
+    const connect = async (): Promise<WebSocket> => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}`, {
+        origin: FIGWRIGHT_KIWI_EXTENSION_ORIGIN,
+      });
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve);
+        socket.once('error', reject);
+      });
+      return socket;
+    };
+
+    const first = await connect();
+    first.send(
+      JSON.stringify({
+        type: 'hello',
+        tabId: 17,
+        url: 'https://www.figma.com/design/old/Test?node-id=6-140',
+      }),
+    );
+    first.send(JSON.stringify({ type: 'frame', tabId: 17, payload: schemaPayload }));
+    first.send(JSON.stringify({ type: 'frame', tabId: 17, payload: messagePayload }));
+    await server.waitForNode('6:140', 2_000, 'old');
+    expect(server.status.sessions).toHaveLength(1);
+
+    const firstClosed = new Promise<void>(resolve => first.once('close', resolve));
+    const replacement = await connect();
+    await firstClosed;
+    expect(server.status.sessions).toEqual([]);
+    expect(server.findNode('6:140', 'old')).toBeNull();
+
+    const nextSession = new Promise<void>(resolve => {
+      server.on('status', (status: CaptureStatus) => {
+        if (status.sessions.some(session => session.tabId === 18)) resolve();
+      });
+    });
+    replacement.send(
+      JSON.stringify({ type: 'hello', tabId: 18, url: 'https://www.figma.com/design/new/Test' }),
+    );
+    await nextSession;
+    const disconnected = new Promise<void>(resolve => {
+      server.on('status', (status: CaptureStatus) => {
+        if (!status.connected) resolve();
+      });
+    });
+    replacement.close();
+    await disconnected;
+    expect(server.status.connected).toBe(false);
+    expect(server.status.sessions).toEqual([]);
+  });
+
   it('removes a detached tab from the server session list', async () => {
     const server = new KiwiCaptureServer({ port: 0 });
     servers.push(server);
