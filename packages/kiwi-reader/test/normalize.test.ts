@@ -271,7 +271,7 @@ describe('normalizeCapturedNode', () => {
     expect(node).toMatchObject({ fontSize: 16, fontName: { family: 'Inter', style: 'Regular' } });
   });
 
-  it('maps child sizing against the parent axis and accepts array transforms', () => {
+  it('maps Kiwi stack sizing against the node axis and accepts array transforms', () => {
     const node = normalizeCapturedNode({
       id: '7:2',
       name: 'Child',
@@ -285,8 +285,8 @@ describe('normalizeCapturedNode', () => {
           [1, 0, 240],
         ],
         stackMode: 'HORIZONTAL',
-        stackPrimarySizing: 'HUG',
-        stackCounterSizing: 'FILL',
+        stackPrimarySizing: 'FIXED',
+        stackCounterSizing: 'RESIZE_TO_FIT_WITH_IMPLICIT_SIZE',
       },
       children: [],
     });
@@ -295,8 +295,88 @@ describe('normalizeCapturedNode', () => {
       x: 120,
       y: 240,
       rotation: 90,
-      layoutSizingHorizontal: 'FILL',
+      layoutSizingHorizontal: 'FIXED',
       layoutSizingVertical: 'HUG',
+    });
+  });
+
+  it('maps vertical stack sizing from the node axis, not the horizontal parent axis', () => {
+    const node = normalizeCapturedNode({
+      id: '7:3',
+      name: 'Menu',
+      type: 'INSTANCE',
+      visible: true,
+      parentStackMode: 'HORIZONTAL',
+      raw: {
+        stackMode: 'VERTICAL',
+        stackPrimarySizing: 'FIXED',
+        stackCounterSizing: 'RESIZE_TO_FIT',
+      },
+      children: [],
+    });
+
+    expect(node).toMatchObject({ layoutSizingHorizontal: 'HUG', layoutSizingVertical: 'FIXED' });
+  });
+
+  it('derives fill from child grow and stretch, overriding the node stack sizing', () => {
+    const node = normalizeCapturedNode({
+      id: '7:4',
+      name: 'Frame 7241',
+      type: 'FRAME',
+      visible: true,
+      parentStackMode: 'VERTICAL',
+      raw: {
+        stackMode: 'HORIZONTAL',
+        stackPrimarySizing: 'FIXED',
+        stackCounterSizing: 'FIXED',
+        stackChildPrimaryGrow: 1,
+        stackChildAlignSelf: 'STRETCH',
+      },
+      children: [],
+    });
+
+    expect(node).toMatchObject({
+      layoutSizingHorizontal: 'FILL',
+      layoutSizingVertical: 'FILL',
+      layoutGrow: 1,
+      layoutAlign: 'STRETCH',
+    });
+  });
+
+  it('keeps a horizontal-parent child fixed in width and fills its height when stretched', () => {
+    const node = normalizeCapturedNode({
+      id: '7:6',
+      name: 'Frame 1597882620',
+      type: 'FRAME',
+      visible: true,
+      parentStackMode: 'HORIZONTAL',
+      raw: { stackMode: 'VERTICAL', stackChildAlignSelf: 'STRETCH' },
+      children: [],
+    });
+
+    expect(node).toMatchObject({ layoutSizingHorizontal: 'FIXED', layoutSizingVertical: 'FILL' });
+  });
+
+  it('does not derive fill for an absolutely positioned child', () => {
+    const node = normalizeCapturedNode({
+      id: '7:5',
+      name: 'Overlay',
+      type: 'FRAME',
+      visible: true,
+      parentStackMode: 'VERTICAL',
+      raw: {
+        stackMode: 'HORIZONTAL',
+        stackChildPrimaryGrow: 1,
+        stackChildAlignSelf: 'STRETCH',
+        stackPositioning: 'ABSOLUTE',
+      },
+      children: [],
+    });
+
+    expect(node).toMatchObject({
+      layoutSizingHorizontal: 'FIXED',
+      layoutSizingVertical: 'FIXED',
+      layoutPositioning: 'ABSOLUTE',
     });
   });
 
