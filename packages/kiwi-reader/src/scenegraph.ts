@@ -421,6 +421,49 @@ const variantProperties = (
   return properties;
 };
 
+const booleanProperties = (
+  instance: KiwiNodeChange,
+  master: KiwiNodeChange,
+  componentSet: KiwiNodeChange | undefined,
+  inheritedAssignments: ReadonlyMap<string, boolean> | undefined,
+): Record<string, { type: 'BOOLEAN'; value: boolean }> | undefined => {
+  const definitions = new Map<string, { name: string; defaultValue: boolean | undefined }>();
+  for (const owner of [componentSet, master]) {
+    if (!Array.isArray(owner?.componentPropDefs)) continue;
+    for (const item of owner.componentPropDefs) {
+      const def = record(item);
+      if (def?.type !== 'BOOL' && def?.type !== 'BOOLEAN') continue;
+      const id = guidId(def.id);
+      const name = def.name;
+      if (id === null || typeof name !== 'string' || name.trim() === '' || definitions.has(id)) {
+        continue;
+      }
+      const initial = record(def.initialValue)?.boolValue;
+      const resolved = record(record(def.varValue)?.value)?.boolValue;
+      definitions.set(id, {
+        name,
+        defaultValue:
+          typeof initial === 'boolean'
+            ? initial
+            : typeof resolved === 'boolean'
+              ? resolved
+              : undefined,
+      });
+    }
+  }
+  if (definitions.size === 0) return undefined;
+
+  const assignments = inheritedBooleanAssignments(instance, inheritedAssignments);
+  const properties: Record<string, { type: 'BOOLEAN'; value: boolean }> = {};
+  for (const [id, definition] of definitions) {
+    const value = assignments.get(id) ?? definition.defaultValue;
+    if (value !== undefined) {
+      properties[`${definition.name}#${id}`] = { type: 'BOOLEAN', value };
+    }
+  }
+  return Object.keys(properties).length === 0 ? undefined : properties;
+};
+
 const instanceMasterId = (raw: KiwiNodeChange): string | null => {
   const swapped = guidId(raw.overriddenSymbolID);
   if (swapped !== null) return swapped;
@@ -691,12 +734,21 @@ export class SceneGraphStore {
             instanceCycles++;
           } else {
             resolvedInstances++;
-            componentProperties = variantProperties(master);
             const componentSetId =
               master.parentIndex?.guid === undefined ? null : nodeId(master.parentIndex.guid);
             const componentSet =
               componentSetId === null ? undefined : this.nodes.get(componentSetId);
             if (componentSetId !== null) dependencies.add(componentSetId);
+            const variants = variantProperties(master);
+            const booleans = booleanProperties(
+              raw,
+              master,
+              componentSet,
+              context?.booleanAssignments,
+            );
+            if (variants !== undefined || booleans !== undefined) {
+              componentProperties = { ...variants, ...booleans };
+            }
             mainComponent = {
               id: masterId,
               name: master.name ?? '',

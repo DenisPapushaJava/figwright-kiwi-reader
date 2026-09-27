@@ -601,6 +601,14 @@ describe('SceneGraphStore', () => {
           name: 'Button',
           type: 'FRAME',
           componentKey: 'button-set-key',
+          componentPropDefs: [
+            {
+              id: { sessionID: 900, localID: 1 },
+              name: 'Leading icon',
+              type: 'BOOL',
+              initialValue: { boolValue: true },
+            },
+          ],
         },
         {
           guid: { sessionID: 90, localID: 2 },
@@ -651,6 +659,7 @@ describe('SceneGraphStore', () => {
       componentProperties: {
         Size: { type: 'VARIANT', value: 'M' },
         State: { type: 'VARIANT', value: 'Enabled' },
+        'Leading icon#900:1': { type: 'BOOLEAN', value: false },
       },
       children: [{ name: 'Leading icon', visible: false, raw: { visible: false } }],
     });
@@ -659,16 +668,93 @@ describe('SceneGraphStore', () => {
       componentProperties: {
         Size: { type: 'VARIANT', value: 'M' },
         State: { type: 'VARIANT', value: 'Enabled' },
+        'Leading icon#900:1': { type: 'BOOLEAN', value: false },
       },
       children: [{ visible: false }],
     });
+  });
+
+  it('reports a boolean property from its component default or an instance override', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 1790, localID: 130326 },
+          name: 'Complexes page',
+          type: 'SYMBOL',
+          componentPropDefs: [
+            {
+              id: { sessionID: 6034, localID: 0 },
+              name: 'Map button',
+              type: 'BOOL',
+              initialValue: { boolValue: true },
+            },
+          ],
+        },
+        {
+          guid: { sessionID: 7475, localID: 195259 },
+          parentIndex: { guid: { sessionID: 1790, localID: 130326 } },
+          name: 'Add complex button',
+          type: 'FRAME',
+          visible: true,
+          componentPropRefs: [
+            {
+              defID: { sessionID: 6034, localID: 0 },
+              componentPropNodeField: 'VISIBLE',
+            },
+          ],
+        },
+        {
+          guid: { sessionID: 10861, localID: 5225 },
+          name: 'Default instance',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 1790, localID: 130326 } },
+        },
+        {
+          guid: { sessionID: 10861, localID: 5226 },
+          name: 'Overridden instance',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 1790, localID: 130326 } },
+          componentPropAssignments: [
+            { defID: { sessionID: 6034, localID: 0 }, value: { boolValue: false } },
+          ],
+        },
+      ],
+    });
+
+    const defaultNode = graph.findWithStats('10861:5225').node;
+    expect(defaultNode?.componentProperties).toEqual({
+      'Map button#6034:0': { type: 'BOOLEAN', value: true },
+    });
+    expect(defaultNode?.children[0]?.visible).toBe(true);
+    expect(
+      defaultNode === null ? null : normalizeCapturedNode(defaultNode).componentProperties,
+    ).toEqual({ 'Map button#6034:0': { type: 'BOOLEAN', value: true } });
+
+    const overriddenNode = graph.findWithStats('10861:5226').node;
+    expect(overriddenNode?.componentProperties).toEqual({
+      'Map button#6034:0': { type: 'BOOLEAN', value: false },
+    });
+    expect(overriddenNode?.children[0]?.visible).toBe(false);
   });
 
   it('keeps outer boolean assignments ahead of nested component defaults', () => {
     const graph = new SceneGraphStore();
     graph.apply({
       nodeChanges: [
-        { guid: { sessionID: 92, localID: 1 }, name: 'Icon slot', type: 'SYMBOL' },
+        {
+          guid: { sessionID: 92, localID: 1 },
+          name: 'Icon slot',
+          type: 'SYMBOL',
+          componentPropDefs: [
+            {
+              id: { sessionID: 920, localID: 1 },
+              name: 'Icon',
+              type: 'BOOL',
+              initialValue: { boolValue: false },
+            },
+          ],
+        },
         {
           guid: { sessionID: 92, localID: 2 },
           parentIndex: { guid: { sessionID: 92, localID: 1 } },
@@ -714,9 +800,15 @@ describe('SceneGraphStore', () => {
       name: 'Icon',
       visible: true,
     });
+    expect(graph.findWithStats('94:1').node?.children[0]?.componentProperties).toEqual({
+      'Icon#920:1': { type: 'BOOLEAN', value: true },
+    });
     expect(graph.findWithStats('93:2').node?.children[0]).toMatchObject({
       name: 'Icon',
       visible: false,
+    });
+    expect(graph.findWithStats('93:2').node?.componentProperties).toEqual({
+      'Icon#920:1': { type: 'BOOLEAN', value: false },
     });
   });
 

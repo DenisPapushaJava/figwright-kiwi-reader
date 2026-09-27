@@ -107,11 +107,13 @@ bindings and OpenType features remain outside this slice and are reported as cav
 Component instances whose children are implicit in Kiwi are expanded from their referenced
 `SYMBOL` definition. The reader applies component text-property assignments, explicit
 `symbolOverrides`, and Figma's resolved `derivedSymbolData` without mutating the cached master.
-Boolean component-property assignments control the referenced layer's visibility, and verified
-variant axes are emitted as `componentProperties`. A variant also carries its parent component-set
-id and name so component grounding can match `Button` instead of a variant-only name such as
-`Size=M, State=Enabled`. Variant axes are emitted only when the master's canonical name agrees with
-its `variantPropSpecs`; unresolved property names are not guessed.
+Boolean component-property assignments control the referenced layer's visibility. Named boolean
+properties are also emitted as `componentProperties` using their definition id (`Name#id`) and the
+effective value from the instance assignment or component default; properties without a known name
+or value are omitted. Verified variant axes are emitted alongside them. A variant also carries its
+parent component-set id and name so component grounding can match `Button` instead of a variant-only
+name such as `Size=M, State=Enabled`. Variant axes are emitted only when the master's canonical name
+agrees with its `variantPropSpecs`; unresolved property names are not guessed.
 Instance swaps delivered as `symbolOverrides[].overriddenSymbolID` resolve to the swapped master's
 identity and descendants. Kiwi does not always include the corresponding component-property
 definition name, so the resolved component is exposed through `mainComponent` while a named
