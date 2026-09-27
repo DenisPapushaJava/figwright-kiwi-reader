@@ -43,6 +43,8 @@ describe('FigLens raster availability panel', () => {
       phase: 'ready',
       captureOptionsSupported: true,
       captureImages: true,
+      selectedNodeId: '6:140',
+      selectedNodeName: 'Business',
       selectedRasterImages: { images: 3, availableImages: 2, truncated: false },
     };
     vi.stubGlobal('chrome', {
@@ -69,6 +71,13 @@ describe('FigLens raster availability panel', () => {
     const count = elements.get('#image-availability-count');
     const help = elements.get('#image-availability-help');
     await vi.waitFor(() => expect(count?.textContent).toBe('Доступно 2 из 3 изображений'));
+    expect(elements.get('#node-name')?.textContent).toBe('Business');
+    expect(elements.get('#node-name')?.title).toBe('Business');
+    expect(elements.get('#node-id')?.textContent).toBe('6:140');
+    expect(elements.get('#status-title')?.textContent).toBe('Структура макета доступна');
+    expect(elements.get('#capture-images-help')?.textContent).toContain(
+      'вкладка Figma перезагрузится',
+    );
     expect(availability?.hidden).toBe(false);
     expect(help?.textContent).toContain('Считать заново');
 
@@ -92,6 +101,21 @@ describe('FigLens raster availability panel', () => {
     });
     expect(count?.textContent).toBe('Доступно 2 из 3 в прочитанной части узла');
     expect(help?.textContent).toContain('Включите захват');
+
+    onState?.({
+      type: 'kiwi-state',
+      state: { ...state, selectedNodeId: '6:141', selectedNodeName: null },
+    });
+    expect(elements.get('#node-name')?.textContent).toBe('6:141');
+    expect(elements.get('#node-id')?.textContent).toBe('6:141');
+    expect(elements.get('#node-id')?.hidden).toBe(true);
+
+    onState?.({
+      type: 'kiwi-state',
+      state: { ...state, selectedNodeId: null, selectedNodeName: null },
+    });
+    expect(elements.get('#node-name')?.textContent).toBe('Выберите узел в Figma');
+    expect(elements.get('#node-id')?.hidden).toBe(true);
 
     onState?.({ type: 'kiwi-state', state: { ...state, attached: false } });
     expect(availability?.hidden).toBe(true);

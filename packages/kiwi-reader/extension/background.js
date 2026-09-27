@@ -36,6 +36,7 @@ const initialState = tabId => ({
   title: null,
   fileKey: null,
   selectedNodeId: null,
+  selectedNodeName: null,
   schemaReady: false,
   nodes: 0,
   decodedFrames: 0,
@@ -52,7 +53,7 @@ const getState = tabId => tabStates.get(tabId) ?? initialState(tabId);
 const badgeForState = state => {
   switch (state.phase) {
     case 'ready':
-      return { text: '✓', color: '#16803c', title: 'FigLens: макет готов к чтению' };
+      return { text: '✓', color: '#16803c', title: 'FigLens: структура макета доступна' };
     case 'reading':
       return { text: 'SYNC', color: '#2563eb', title: 'FigLens: чтение узлов Figma' };
     case 'connecting':
@@ -176,6 +177,7 @@ const applyCaptureStatus = session => {
     title: session.title,
     fileKey: session.fileKey,
     selectedNodeId: session.selectedNodeId,
+    selectedNodeName: session.selectedNodeName ?? null,
     schemaReady: session.schemaReady,
     nodes: session.nodes,
     decodedFrames: session.decodedFrames,
@@ -323,6 +325,7 @@ const connectBridge = () => {
           title: message.session?.title ?? getState(message.tabId).title,
           fileKey: message.session?.fileKey ?? getState(message.tabId).fileKey,
           selectedNodeId: message.session?.selectedNodeId ?? getState(message.tabId).selectedNodeId,
+          selectedNodeName: getState(message.tabId).selectedNodeName,
           schemaReady: message.session?.schemaReady ?? false,
           nodes: message.session?.nodes ?? 0,
           decodedFrames: message.session?.decodedFrames ?? 0,
@@ -391,6 +394,7 @@ const reloadCapture = async tabId => {
     decodedFrames: 0,
     ignoredFrames: 0,
     selectedRasterImages: null,
+    selectedNodeName: null,
     captureImages,
   });
   await sendHello(tabId, true);

@@ -96,7 +96,10 @@ export interface CaptureStatus {
 
 interface CaptureStatusMessage {
   type: 'capture-status';
-  session: CaptureSessionStatus & { selectedRasterImages: SelectedRasterImageStatus | null };
+  session: CaptureSessionStatus & {
+    selectedNodeName: string | null;
+    selectedRasterImages: SelectedRasterImageStatus | null;
+  };
 }
 
 export interface SelectedRasterImageStatus {
@@ -637,7 +640,12 @@ export class KiwiCaptureServer extends EventEmitter {
     }
     const message: CaptureStatusMessage = {
       type: 'capture-status',
-      session: { ...session.status, selectedRasterImages },
+      session: {
+        ...session.status,
+        selectedNodeName:
+          session.selectedNodeId === null ? null : session.graph.nameOf(session.selectedNodeId),
+        selectedRasterImages,
+      },
     };
     socket.send(JSON.stringify(message));
     this.emit('status', this.status);

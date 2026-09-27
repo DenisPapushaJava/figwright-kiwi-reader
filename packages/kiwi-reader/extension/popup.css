@@ -153,6 +153,11 @@ body {
   padding-top: 6px;
 }
 
+.side-panel .node-row strong {
+  font-size: 12px;
+  line-height: 16px;
+}
+
 .side-panel .stats div {
   padding: 7px 10px;
 }
@@ -486,17 +491,25 @@ h1 {
 }
 
 .node-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
   margin-top: 11px;
   padding-top: 10px;
   border-top: 1px solid #edf0f3;
 }
 
-.node-row code {
+.node-row strong {
+  display: block;
   overflow: hidden;
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 19px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.node-row code {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
   color: #344054;
   font-size: 11px;
   text-overflow: ellipsis;

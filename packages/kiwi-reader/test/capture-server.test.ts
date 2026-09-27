@@ -136,6 +136,7 @@ describe('KiwiCaptureServer', () => {
         tabId: 17,
         fileKey: 'file',
         selectedNodeId: '6:140',
+        selectedNodeName: 'Business',
         schemaReady: true,
         nodes: 1,
         decodedFrames: 1,

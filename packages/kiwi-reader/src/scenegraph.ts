@@ -542,6 +542,10 @@ export class SceneGraphStore {
     return this.nodes.has(normalizeNodeId(id));
   }
 
+  nameOf(id: string): string | null {
+    return this.nodes.get(normalizeNodeId(id))?.name?.trim() || null;
+  }
+
   /**
    * Summarizes every direct child without expanding a depth-first read first. This keeps a large
    * first section from consuming the normal read budget and hiding its later siblings from an MCP

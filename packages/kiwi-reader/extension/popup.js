@@ -7,6 +7,7 @@ const elements = {
   errorCode: document.querySelector('#error-code'),
   copyDiagnostics: document.querySelector('#copy-diagnostics'),
   fileTitle: document.querySelector('#file-title'),
+  nodeName: document.querySelector('#node-name'),
   nodeId: document.querySelector('#node-id'),
   nodeCount: document.querySelector('#node-count'),
   frameCount: document.querySelector('#frame-count'),
@@ -26,7 +27,7 @@ const phaseCopy = {
   reloading: ['Перезагружаю вкладку', 'После загрузки начнётся чтение макета'],
   waiting: ['Жду данные Figma', 'Ищу схему fig-wire и первые узлы'],
   reading: ['Читаю структуру макета', 'Счётчик растёт по мере получения узлов'],
-  ready: ['Макет готов к чтению', 'AI-ассистент уже может запрашивать выбранный узел'],
+  ready: ['Структура макета доступна', 'AI-ассистент может запрашивать полученные узлы'],
   reconnecting: ['Связь с MCP потеряна', 'Переподключаюсь автоматически'],
   error: ['Не удалось завершить чтение', 'Скопируйте диагностику или повторите захват'],
 };
@@ -35,7 +36,8 @@ let tabId = null;
 let currentState = null;
 let supportedTab = false;
 const isSidePanel = document.body.classList.contains('side-panel');
-const captureImagesHelp = 'Включите для фото; макетные заглушки можно пропустить';
+const captureImagesHelp =
+  'Для фото. После изменения настройки нажмите «Считать заново» — вкладка Figma перезагрузится';
 const reloadExtensionHelp =
   'Обновите расширение на chrome://extensions, затем откройте панель снова';
 
@@ -95,10 +97,13 @@ const render = state => {
   currentState = state;
   const phase = state?.phase ?? 'idle';
   const [title, fallbackDetail] = phaseCopy[phase] ?? phaseCopy.idle;
-  elements.statusTitle.textContent = supportedTab ? title : 'Откройте макет Figma';
-  elements.statusDetail.textContent = supportedTab
-    ? state?.errorMessage || fallbackDetail
-    : 'Расширение работает только на figma.com';
+  setText(elements.statusTitle, supportedTab ? title : 'Откройте макет Figma');
+  setText(
+    elements.statusDetail,
+    supportedTab
+      ? state?.errorMessage || fallbackDetail
+      : 'Расширение работает только на figma.com',
+  );
   elements.statusDot.className = `status-dot ${
     phase === 'ready' ? 'ready' : phase === 'error' ? 'error' : phase === 'idle' ? '' : 'active'
   }`;
@@ -109,7 +114,12 @@ const render = state => {
   elements.errorCode.textContent = state?.errorCode ?? 'UNKNOWN_ERROR';
   elements.fileTitle.textContent = state?.title ? cleanTitle(state.title) : 'Не выбран';
   elements.fileTitle.title = state?.title ?? '';
+  const selectedNodeName = state?.selectedNodeName?.trim() || null;
+  elements.nodeName.textContent =
+    selectedNodeName ?? state?.selectedNodeId ?? 'Выберите узел в Figma';
+  elements.nodeName.title = selectedNodeName ?? state?.selectedNodeId ?? '';
   elements.nodeId.textContent = state?.selectedNodeId ?? '—';
+  elements.nodeId.hidden = !state?.selectedNodeId || selectedNodeName === null;
   elements.nodeCount.textContent = formatNumber(state?.nodes);
   elements.frameCount.textContent = formatNumber(state?.decodedFrames);
   elements.captureImages.checked = state?.captureImages === true;
