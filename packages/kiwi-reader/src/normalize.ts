@@ -228,6 +228,14 @@ const normalizeAutoLayout = (raw: UnknownRecord): SerializedAutoLayout | undefin
   return output;
 };
 
+type LayoutSizing = 'FIXED' | 'HUG' | 'FILL';
+
+const kiwiStackSizing = (value: unknown): LayoutSizing | undefined => {
+  if (value === 'FIXED') return 'FIXED';
+  if (value === 'RESIZE_TO_FIT' || value === 'RESIZE_TO_FIT_WITH_IMPLICIT_SIZE') return 'HUG';
+  return undefined;
+};
+
 const normalizeLineHeight = (value: unknown): SerializedLineHeight | undefined => {
   const source = record(value);
   const unit = nonEmptyString(source?.unit ?? source?.units);
@@ -587,23 +595,33 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
 
   const layout = normalizeAutoLayout(raw);
   if (layout !== undefined) output.layout = layout;
-  const primarySizing = nonEmptyString(raw.stackPrimarySizing);
-  const counterSizing = nonEmptyString(raw.stackCounterSizing);
-  const sizingHorizontal =
-    node.parentStackMode === 'VERTICAL'
-      ? counterSizing
-      : node.parentStackMode === 'HORIZONTAL'
-        ? primarySizing
-        : undefined;
-  const sizingVertical =
-    node.parentStackMode === 'VERTICAL'
-      ? primarySizing
-      : node.parentStackMode === 'HORIZONTAL'
-        ? counterSizing
-        : undefined;
+  const primarySizing =
+    raw.stackPrimarySizing === undefined ? 'FIXED' : kiwiStackSizing(raw.stackPrimarySizing);
+  const counterSizing =
+    raw.stackCounterSizing === undefined ? 'FIXED' : kiwiStackSizing(raw.stackCounterSizing);
+  // Stack sizing uses this node's axes; grow and stretch use its parent's axes.
+  let sizingHorizontal: LayoutSizing | undefined;
+  let sizingVertical: LayoutSizing | undefined;
+  if (layout?.mode === 'HORIZONTAL') {
+    sizingHorizontal = primarySizing;
+    sizingVertical = counterSizing;
+  } else if (layout?.mode === 'VERTICAL') {
+    sizingHorizontal = counterSizing;
+    sizingVertical = primarySizing;
+  }
   const layoutAlign = nonEmptyString(raw.stackChildAlignSelf);
   const layoutPositioning = nonEmptyString(raw.stackPositioning);
   const layoutGrow = finiteNumber(raw.stackChildPrimaryGrow);
+  if (layoutPositioning !== 'ABSOLUTE') {
+    if (layoutGrow !== undefined && layoutGrow > 0) {
+      if (node.parentStackMode === 'HORIZONTAL') sizingHorizontal = 'FILL';
+      if (node.parentStackMode === 'VERTICAL') sizingVertical = 'FILL';
+    }
+    if (layoutAlign === 'STRETCH') {
+      if (node.parentStackMode === 'HORIZONTAL') sizingVertical = 'FILL';
+      if (node.parentStackMode === 'VERTICAL') sizingHorizontal = 'FILL';
+    }
+  }
   if (sizingHorizontal !== undefined) output.layoutSizingHorizontal = sizingHorizontal;
   if (sizingVertical !== undefined) output.layoutSizingVertical = sizingVertical;
   if (layoutAlign !== undefined) output.layoutAlign = layoutAlign;

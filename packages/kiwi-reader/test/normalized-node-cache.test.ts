@@ -231,7 +231,7 @@ describe('NormalizedNodeCache', () => {
           guid: { sessionID: 70, localID: 2 },
           parentIndex: { guid: { sessionID: 70, localID: 1 } },
           name: 'Child',
-          stackPrimarySizing: 'HUG',
+          stackChildPrimaryGrow: 1,
         },
       ],
     });
@@ -252,7 +252,7 @@ describe('NormalizedNodeCache', () => {
     const withParent = cache.read(graph, '70:2', 8, 2_000);
 
     expect(withParent).not.toBe(withoutParent);
-    expect(cache.normalize(withParent)?.layoutSizingVertical).toBe('HUG');
+    expect(cache.normalize(withParent)?.layoutSizingVertical).toBe('FILL');
     expect(cache.stats).toMatchObject({ misses: 2, invalidations: 1 });
   });
 
