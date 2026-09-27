@@ -209,7 +209,10 @@ const normalizeAutoLayout = (raw: UnknownRecord): SerializedAutoLayout | undefin
     const primary = nonEmptyString(raw.stackPrimaryAlignItems);
     const counter = nonEmptyString(raw.stackCounterAlignItems);
     const wrap = nonEmptyString(raw.stackWrap);
-    if (primary !== undefined) output.primaryAxisAlignItems = primary;
+    // Kiwi's legacy SPACE_EVENLY is Figma's auto gap (now named SPACE_BETWEEN).
+    if (primary !== undefined) {
+      output.primaryAxisAlignItems = primary === 'SPACE_EVENLY' ? 'SPACE_BETWEEN' : primary;
+    }
     if (counter !== undefined) output.counterAxisAlignItems = counter;
     if (wrap !== undefined) output.layoutWrap = wrap;
     if (wrap === 'WRAP') {

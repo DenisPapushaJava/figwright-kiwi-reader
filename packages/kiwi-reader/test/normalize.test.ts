@@ -5,6 +5,25 @@ import { KiwiNormalizationError, normalizeCapturedNode } from '../src/normalize.
 import type { CapturedNode } from '../src/scenegraph.js';
 
 describe('normalizeCapturedNode', () => {
+  it('maps legacy Kiwi auto-gap alignment to the Figma primary-axis value', () => {
+    for (const [kiwi, expected] of [
+      ['SPACE_EVENLY', 'SPACE_BETWEEN'],
+      ['SPACE_BETWEEN', 'SPACE_BETWEEN'],
+      ['SPACE_AROUND', 'SPACE_AROUND'],
+      ['CENTER', 'CENTER'],
+    ]) {
+      const node = normalizeCapturedNode({
+        id: '1:2',
+        name: 'Auto layout',
+        type: 'FRAME',
+        visible: true,
+        raw: { stackMode: 'HORIZONTAL', stackPrimaryAlignItems: kiwi },
+        children: [],
+      });
+      expect(node.layout?.primaryAxisAlignItems).toBe(expected);
+    }
+  });
+
   it('maps observed Kiwi geometry, paint, layout, effects and text to SerializedNode', () => {
     const captured: CapturedNode = {
       id: '1:2',
