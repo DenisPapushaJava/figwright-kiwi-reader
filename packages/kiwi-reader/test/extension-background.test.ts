@@ -175,6 +175,14 @@ describe('Kiwi extension background messages', () => {
     await expect(invoke({ type: 'connect', tabId: 42 })).resolves.toMatchObject({ ok: true });
     const first = sockets[0];
     expect(first).toBeDefined();
+    await expect(
+      invoke({ type: 'set-capture-options', tabId: 42, captureImages: false }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(first?.sent.at(-1)).toMatchObject({ type: 'hello', captureImages: false });
+    await expect(
+      invoke({ type: 'set-capture-options', tabId: 42, captureImages: true }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(first?.sent.at(-1)).toMatchObject({ type: 'hello', captureImages: true });
     const imageUrl = 'https://www.figma.com/image/asset.png';
     const receiveImage = (requestId: string) => {
       onDebuggerEvent?.({ tabId: 42 }, 'Network.responseReceived', {

@@ -213,6 +213,24 @@ const paintImages = (
   return output;
 };
 
+/** The panel and asset export count the same visible Kiwi IMAGE paints. */
+export const summarizeRasterImages = (
+  root: CapturedNode,
+  networkAssets?: CapturedNetworkAssetStore,
+): { images: number; availableImages: number } => {
+  let images = 0;
+  let availableImages = 0;
+  const visit = (node: CapturedNode): void => {
+    for (const image of paintImages(node)) {
+      images++;
+      if (image.hash !== null && networkAssets?.hasHash(image.hash) === true) availableImages++;
+    }
+    for (const child of node.children) visit(child);
+  };
+  visit(root);
+  return { images, availableImages };
+};
+
 export const collectDesignAssetInventory = (
   root: CapturedNode,
   blobs: CapturedBlobStore,
@@ -242,8 +260,7 @@ export const collectDesignAssetInventory = (
     }
     for (const image of paintImages(node)) {
       const id = image.hash ?? `${node.id}:unknown`;
-      const available =
-        image.hash !== null && (networkAssets?.resolveHash(image.hash) ?? null) !== null;
+      const available = image.hash !== null && networkAssets?.hasHash(image.hash) === true;
       entries.push({
         assetId: `image:${id}`,
         nodeId: node.id,

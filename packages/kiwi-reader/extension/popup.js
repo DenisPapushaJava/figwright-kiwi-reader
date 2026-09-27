@@ -12,6 +12,9 @@ const elements = {
   frameCount: document.querySelector('#frame-count'),
   captureImages: document.querySelector('#capture-images'),
   captureImagesHelp: document.querySelector('#capture-images-help'),
+  imageAvailability: document.querySelector('#image-availability'),
+  imageAvailabilityCount: document.querySelector('#image-availability-count'),
+  imageAvailabilityHelp: document.querySelector('#image-availability-help'),
   pin: document.querySelector('#pin-action'),
   primary: document.querySelector('#primary-action'),
   disconnect: document.querySelector('#disconnect-action'),
@@ -37,6 +40,9 @@ const reloadExtensionHelp =
   'Обновите расширение на chrome://extensions, затем откройте панель снова';
 
 const formatNumber = value => new Intl.NumberFormat('ru-RU').format(value ?? 0);
+const setText = (element, value) => {
+  if (element.textContent !== value) element.textContent = value;
+};
 
 const cleanTitle = title => title?.replace(/\s*[–-]\s*Figma\s*$/i, '').trim() || 'Макет Figma';
 
@@ -53,6 +59,7 @@ const diagnostics = state =>
       decodedFrames: state?.decodedFrames ?? 0,
       ignoredFrames: state?.ignoredFrames ?? 0,
       captureImages: state?.captureImages === true,
+      selectedRasterImages: state?.selectedRasterImages ?? null,
       extensionVersion: chrome.runtime.getManifest().version,
     },
     null,
@@ -110,6 +117,33 @@ const render = state => {
   elements.captureImagesHelp.textContent = captureOptionsSupported
     ? captureImagesHelp
     : reloadExtensionHelp;
+  const images = state?.selectedRasterImages;
+  const showImages = state?.attached === true && Number.isInteger(images?.images);
+  elements.imageAvailability.hidden = !showImages;
+  if (showImages) {
+    const total = formatNumber(images.images);
+    const available = formatNumber(images.availableImages);
+    setText(
+      elements.imageAvailabilityCount,
+      images.images === 0
+        ? images.truncated
+          ? 'В прочитанной части узла растров нет'
+          : 'В выбранном узле нет растров'
+        : images.truncated
+          ? `Доступно ${available} из ${total} в прочитанной части узла`
+          : `Доступно ${available} из ${total} изображений`,
+    );
+    setText(
+      elements.imageAvailabilityHelp,
+      images.images > images.availableImages
+        ? state.captureImages
+          ? 'Откройте нужный экран в Figma и нажмите «Считать заново»'
+          : 'Включите захват изображений и нажмите «Считать заново»'
+        : images.truncated
+          ? 'Большой узел прочитан частично; проверьте нужный фрейм отдельно'
+          : '',
+    );
+  }
 
   const busy = ['connecting', 'reloading'].includes(phase);
   if (elements.pin) elements.pin.disabled = !supportedTab;

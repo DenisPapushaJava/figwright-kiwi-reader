@@ -109,6 +109,10 @@ export class CapturedNetworkAssetStore {
     return asset === undefined ? null : { ...asset, bytes: asset.bytes.slice() };
   }
 
+  hasHash(hash: string): boolean {
+    return this.hashes.has(hash.toLowerCase());
+  }
+
   clear(): void {
     this.assets.clear();
     this.hashes.clear();

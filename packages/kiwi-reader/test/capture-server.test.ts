@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { zstdCompressSync } from 'node:zlib';
 
 import { compileSchema, encodeBinarySchema, parseSchema } from 'kiwi-schema';
@@ -138,6 +139,7 @@ describe('KiwiCaptureServer', () => {
         schemaReady: true,
         nodes: 1,
         decodedFrames: 1,
+        selectedRasterImages: { images: 0, availableImages: 0, truncated: false },
       },
     });
     expect(server.findNode('6:140', 'file')).toMatchObject({
@@ -355,6 +357,98 @@ describe('KiwiCaptureServer', () => {
     expect(session.status.networkAssets).toMatchObject({ received: 1, retained: 1, bytes: 3 });
     session.reset();
     expect(session.status.networkAssets).toMatchObject({ received: 0, retained: 0, bytes: 0 });
+  });
+
+  it('updates selected raster availability after assets arrive and the selection changes', () => {
+    const { schemaPayload } = fixtureFrames();
+    const bytes = Buffer.from([1, 2, 3]);
+    const hash = createHash('sha1').update(bytes).digest('hex');
+    const session = new KiwiCaptureSession(
+      45,
+      {
+        type: 'hello',
+        tabId: 45,
+        url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+        captureImages: true,
+      },
+      { fileKey: 'file', selectedNodeId: '6:140' },
+    );
+    expect(session.selectedRasterImages).toBeNull();
+    session.ingest(schemaPayload);
+    session.graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 6, localID: 140 }, name: 'Frame', type: 'FRAME' },
+        {
+          guid: { sessionID: 6, localID: 141 },
+          name: 'Photo',
+          type: 'RECTANGLE',
+          parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
+          fillPaints: [{ type: 'IMAGE', visible: true, imageHash: hash }],
+        },
+        {
+          guid: { sessionID: 6, localID: 142 },
+          name: 'Missing',
+          type: 'RECTANGLE',
+          parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+          fillPaints: [{ type: 'IMAGE', visible: true, imageHash: 'unknown-hash' }],
+        },
+        {
+          guid: { sessionID: 6, localID: 143 },
+          name: 'Hidden',
+          type: 'RECTANGLE',
+          parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'c' },
+          fillPaints: [{ type: 'IMAGE', visible: false, imageHash: hash }],
+        },
+      ],
+    });
+    expect(session.selectedRasterImages).toEqual({
+      images: 2,
+      availableImages: 0,
+      truncated: false,
+    });
+    session.ingestAsset({
+      url: 'https://www.figma.com/image/test',
+      mimeType: 'image/png',
+      payload: bytes.toString('base64'),
+      base64Encoded: true,
+    });
+    expect(session.selectedRasterImages).toEqual({
+      images: 2,
+      availableImages: 1,
+      truncated: false,
+    });
+    session.graph.apply({
+      nodeChanges: Array.from({ length: 13 }, (_, index) => ({
+        guid: { sessionID: 6, localID: 200 + index },
+        name: `Nested ${index}`,
+        type: 'FRAME',
+        parentIndex: {
+          guid: { sessionID: 6, localID: index === 0 ? 140 : 199 + index },
+          position: 'd',
+        },
+      })),
+    });
+    expect(session.selectedRasterImages).toEqual({
+      images: 2,
+      availableImages: 1,
+      truncated: true,
+    });
+    session.updateHello(
+      {
+        type: 'hello',
+        tabId: 45,
+        url: 'https://www.figma.com/design/file/Test?node-id=6-141',
+        captureImages: true,
+      },
+      { fileKey: 'file', selectedNodeId: '6:141' },
+    );
+    expect(session.selectedRasterImages).toEqual({
+      images: 1,
+      availableImages: 1,
+      truncated: false,
+    });
+    session.reset();
+    expect(session.selectedRasterImages).toBeNull();
   });
 
   it('coalesces progress while retaining the latest counters', async () => {

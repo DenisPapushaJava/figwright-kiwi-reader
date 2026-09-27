@@ -179,6 +179,10 @@ bytes. The option is persisted in `chrome.storage.local`; only eligible `image/*
 observed during the following reload are forwarded. An opt-in raster recapture bypasses Chrome's
 HTTP cache so repeated captures can obtain the response bodies instead of silently losing cached
 images; ordinary structure-only captures keep the cache enabled.
+When a node is selected, the popup and side panel show how many of its image fills have original
+bodies available. For a large subtree the count is explicitly marked as partial. If images are
+missing, open the relevant frame in Figma and choose **Считать заново**; changing the checkbox alone
+does not reload the tab.
 
 After changing files in the unpacked extension directory, press **Reload** on the extension card at
 `chrome://extensions` and reopen the popup or side panel. Chrome can otherwise keep the previous

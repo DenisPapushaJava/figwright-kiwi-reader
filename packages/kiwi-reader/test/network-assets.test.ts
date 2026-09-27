@@ -27,7 +27,10 @@ describe('CapturedNetworkAssetStore', () => {
     });
 
     expect(store.resolveHash(expectedHash)?.bytes).toEqual(bytes);
+    expect(store.hasHash(expectedHash.toUpperCase())).toBe(true);
     expect(store.stats).toMatchObject({ received: 2, retained: 1, deduplicated: 1, rejected: 0 });
+    store.clear();
+    expect(store.hasHash(expectedHash)).toBe(false);
   });
 
   it('rejects non-images, malformed base64 and data outside configured budgets', () => {
