@@ -18,8 +18,8 @@
           id="pin-action"
           class="pin-action"
           type="button"
-          aria-label="Закрепить в боковой панели"
-          title="Закрепить панель"
+          aria-label="Открыть боковую панель"
+          title="Открыть боковую панель"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -37,66 +37,46 @@
             <p id="status-detail">Связываюсь с расширением</p>
           </div>
         </div>
-        <div id="progress" class="progress" role="progressbar" aria-label="Состояние чтения">
-          <span></span>
-        </div>
       </section>
 
       <section id="error-card" class="error-card" hidden>
-        <div>
-          <span>Код ошибки</span>
-          <code id="error-code">UNKNOWN</code>
-        </div>
         <button id="copy-diagnostics" type="button">Копировать диагностику</button>
       </section>
 
-      <section class="file-card">
+      <section id="file-card" class="file-card">
         <div class="file-label">Текущий макет</div>
         <strong id="file-title">Не выбран</strong>
         <div class="node-row">
           <span>Выбранный узел</span>
           <strong id="node-name">Выберите узел в Figma</strong>
-          <code id="node-id">—</code>
         </div>
       </section>
 
-      <section class="stats" aria-label="Статистика чтения">
+      <section id="capture-summary" class="capture-summary" aria-label="Прочитанные узлы" hidden>
+        <span id="node-count">0</span>
         <div>
-          <span id="node-count">0</span>
-          <small>узлов получено</small>
-        </div>
-        <div>
-          <span id="frame-count">0</span>
-          <small>кадров декодировано</small>
+          <strong>узлов прочитано</strong>
         </div>
       </section>
 
-      <section class="capture-options" aria-labelledby="capture-options-title">
-        <strong id="capture-options-title">Дополнительные данные</strong>
+      <section id="capture-options" class="capture-options" aria-labelledby="capture-options-title">
+        <strong id="capture-options-title">Изображения</strong>
         <label>
           <input id="capture-images" type="checkbox" />
           <span>
-            <b>Захватывать растровые изображения</b>
-            <small id="capture-images-help"
-              >Включите для фото; макетные заглушки можно пропустить</small
-            >
+            <b>Сохранять исходные изображения</b>
+            <small id="capture-images-help">Для фото и текстур из макета</small>
           </span>
         </label>
-        <div id="image-availability" class="image-availability" role="status" hidden>
-          <strong id="image-availability-count"></strong>
-          <small id="image-availability-help"></small>
-        </div>
       </section>
-
-      <p class="hint">
-        Общий размер заранее неизвестен: полоса показывает активность, а готовность определяется
-        после стабилизации потока.
-      </p>
 
       <div class="actions">
         <button id="primary-action" class="primary" type="button">Подключить макет</button>
         <button id="disconnect-action" class="secondary" type="button" hidden>Отключить</button>
       </div>
+      <p id="recapture-note" class="recapture-note" hidden>
+        Обновление перезагрузит вкладку Figma.
+      </p>
     </main>
     <script src="popup.js"></script>
   </body>

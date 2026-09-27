@@ -41,7 +41,6 @@ const initialState = tabId => ({
   nodes: 0,
   decodedFrames: 0,
   ignoredFrames: 0,
-  selectedRasterImages: null,
   captureImages,
   captureOptionsSupported: true,
   errorCode: null,
@@ -182,7 +181,6 @@ const applyCaptureStatus = session => {
     nodes: session.nodes,
     decodedFrames: session.decodedFrames,
     ignoredFrames: session.ignoredFrames,
-    selectedRasterImages: session.selectedRasterImages ?? null,
     captureImages: session.captureImages ?? captureImages,
     errorCode: null,
     errorMessage: null,
@@ -237,7 +235,6 @@ const resyncAttachedTabs = async () => {
           nodes: 0,
           decodedFrames: 0,
           ignoredFrames: 0,
-          selectedRasterImages: null,
         });
         await sendHello(tabId, true);
         await chrome.debugger.sendCommand({ tabId }, 'Network.enable');
@@ -330,7 +327,6 @@ const connectBridge = () => {
           nodes: message.session?.nodes ?? 0,
           decodedFrames: message.session?.decodedFrames ?? 0,
           ignoredFrames: message.session?.ignoredFrames ?? 0,
-          selectedRasterImages: message.session?.selectedRasterImages ?? null,
           errorCode: message.code,
           errorMessage: message.message,
         });
@@ -393,7 +389,6 @@ const reloadCapture = async tabId => {
     nodes: 0,
     decodedFrames: 0,
     ignoredFrames: 0,
-    selectedRasterImages: null,
     selectedNodeName: null,
     captureImages,
   });

@@ -36,7 +36,7 @@ body {
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 6px;
+  padding: 12px;
 }
 
 .side-panel .header {
@@ -55,13 +55,12 @@ body {
 }
 
 .side-panel .header p {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .side-panel .status-card {
-  position: relative;
   min-height: 58px;
-  padding: 10px 54px 10px 11px;
+  padding: 10px 11px;
 }
 
 .side-panel .status-heading {
@@ -75,69 +74,20 @@ body {
 
 .side-panel .status-heading p {
   min-height: 0;
-  font-size: 10px;
-  line-height: 14px;
-}
-
-.side-panel .status-dot {
-  display: none;
-}
-
-.side-panel .progress {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 34px;
-  height: 34px;
-  margin: 0;
-  border-radius: 50%;
-}
-
-.side-panel .progress span {
-  position: absolute;
-  inset: 4px;
-  width: auto;
-  height: auto;
-  border-radius: 50%;
-  background: white;
-  transform: none;
-}
-
-.side-panel .progress.active {
-  background: conic-gradient(from 0deg, #2f6fed, #7c4dff 46%, #e4e9f1 47%);
-  animation: spinner 1s linear infinite;
-}
-
-.side-panel .progress.active span,
-.side-panel .progress.ready span,
-.side-panel .progress.error span {
-  width: auto;
-  animation: none;
-}
-
-.side-panel .progress.ready {
-  background: #17a05d;
-}
-
-.side-panel .progress.error {
-  background: #d92d20;
-}
-
-@keyframes spinner {
-  to {
-    transform: rotate(360deg);
-  }
+  font-size: 11px;
+  line-height: 15px;
 }
 
 .side-panel .error-card,
 .side-panel .file-card,
-.side-panel .stats,
+.side-panel .capture-summary,
 .side-panel .capture-options {
   margin-top: 7px;
 }
 
 .side-panel .error-card,
 .side-panel .file-card,
+.side-panel .capture-summary,
 .side-panel .capture-options {
   padding: 9px 10px;
 }
@@ -158,19 +108,9 @@ body {
   line-height: 16px;
 }
 
-.side-panel .stats div {
-  padding: 7px 10px;
-}
-
-.side-panel .stats span {
-  font-size: 15px;
-  line-height: 18px;
-}
-
-.side-panel .stats small,
 .side-panel .file-label,
 .side-panel .node-row span {
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .side-panel .capture-options label {
@@ -178,17 +118,13 @@ body {
 }
 
 .side-panel .capture-options b {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .side-panel .capture-options small {
-  font-size: 9px;
-  line-height: 12px;
-}
-
-.side-panel .hint {
-  display: none;
+  font-size: 11px;
+  line-height: 15px;
 }
 
 .side-panel .actions {
@@ -260,7 +196,7 @@ h1 {
 
 .status-card,
 .file-card,
-.stats,
+.capture-summary,
 .error-card,
 .capture-options {
   border: 1px solid #e3e8ef;
@@ -304,6 +240,11 @@ h1 {
   box-shadow: 0 0 0 4px rgb(217 45 32 / 14%);
 }
 
+.status-dot.warning {
+  background: #d99a20;
+  box-shadow: 0 0 0 4px rgb(217 154 32 / 14%);
+}
+
 .status-heading strong {
   display: block;
   font-size: 14px;
@@ -318,51 +259,10 @@ h1 {
   line-height: 18px;
 }
 
-.progress {
-  height: 6px;
-  margin-top: 13px;
-  overflow: hidden;
-  border-radius: 999px;
-  background: #edf1f5;
-}
-
-.progress span {
-  display: block;
-  width: 0;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #2f6fed, #7c4dff);
-}
-
-.progress.active span {
-  width: 38%;
-  animation: loading 1.25s ease-in-out infinite;
-}
-
-.progress.ready span {
-  width: 100%;
-  background: #17a05d;
-}
-
-.progress.error span {
-  width: 100%;
-  background: #d92d20;
-}
-
-@keyframes loading {
-  0% {
-    transform: translateX(-110%);
-  }
-  100% {
-    transform: translateX(280%);
-  }
-}
-
 .error-card {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-end;
   margin-top: 10px;
   padding: 11px 12px;
   border-color: #f5c6c2;
@@ -373,23 +273,6 @@ h1 {
   display: none;
 }
 
-.error-card span,
-.error-card code {
-  display: block;
-}
-
-.error-card span {
-  margin-bottom: 3px;
-  color: #8f3128;
-  font-size: 10px;
-}
-
-.error-card code {
-  color: #b42318;
-  font-size: 11px;
-  font-weight: 700;
-}
-
 .error-card button {
   min-height: 30px;
   flex: 0 0 auto;
@@ -397,7 +280,7 @@ h1 {
   color: #8f3128;
   border: 1px solid #efb0aa;
   background: white;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .file-card {
@@ -405,9 +288,35 @@ h1 {
   padding: 13px 14px;
 }
 
+.file-card[hidden],
+.capture-summary[hidden],
+.capture-options[hidden] {
+  display: none;
+}
+
+.capture-summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+  padding: 11px 14px;
+}
+
+.capture-summary > span {
+  font-size: 20px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+  line-height: 24px;
+}
+
+.capture-summary strong {
+  display: block;
+  font-size: 11px;
+  line-height: 15px;
+}
+
 .file-label,
-.node-row span,
-.stats small {
+.node-row span {
   color: #667085;
   font-size: 11px;
 }
@@ -442,30 +351,6 @@ h1 {
 .capture-options b,
 .capture-options small {
   display: block;
-}
-
-.image-availability {
-  margin-top: 10px;
-  padding-top: 9px;
-  border-top: 1px solid #edf0f3;
-}
-
-.image-availability[hidden] {
-  display: none;
-}
-
-.image-availability strong {
-  display: block;
-  color: #344054;
-  font-size: 11px;
-  line-height: 16px;
-}
-
-.image-availability small {
-  margin-top: 2px;
-  color: #667085;
-  font-size: 10px;
-  line-height: 15px;
 }
 
 .capture-options b {
@@ -506,51 +391,15 @@ h1 {
   white-space: nowrap;
 }
 
-.node-row code {
-  display: block;
-  overflow: hidden;
-  margin-top: 2px;
-  color: #344054;
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.stats {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  margin-top: 10px;
-}
-
-.stats div {
-  padding: 12px 14px;
-}
-
-.stats div + div {
-  border-left: 1px solid #edf0f3;
-}
-
-.stats span,
-.stats small {
-  display: block;
-}
-
-.stats span {
-  font-size: 18px;
-  font-variant-numeric: tabular-nums;
-  font-weight: 750;
-  line-height: 22px;
-}
-
-.stats small {
-  margin-top: 2px;
-}
-
-.hint {
+.recapture-note {
   margin: 11px 2px 0;
   color: #667085;
   font-size: 11px;
   line-height: 16px;
+}
+
+.recapture-note[hidden] {
+  display: none;
 }
 
 .actions {

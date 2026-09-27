@@ -162,27 +162,23 @@ The checked-in manifest key pins the unpacked extension ID to
 origin. If an older unpacked installation shows a different ID after this update, remove that entry
 from `chrome://extensions` and load the same directory again once.
 
-The popup reports the actual capture phase, file and selected node, decoded frame count, and number
-of nodes received. Its progress bar is intentionally indeterminate while capture is active: the
-Kiwi stream does not advertise a total node count from which an honest percentage could be
-calculated. Progress notifications are coalesced to at most ten updates per second so a large file
-does not turn every wire message into several Chrome action API calls. Chrome always closes an
-action popup when it loses focus. Use the pin button in the
-popup to move the same controls into Chrome's persistent side panel while selecting frames on the
-canvas. The action badge keeps the compact state: `…` while connecting, `SYNC` while nodes arrive,
-`✓` when the graph has settled, `WAIT` while reconnecting, and `ERR` on an actionable failure.
-Reopen either surface to see the current counters, recapture the file, or detach.
+The popup reports the capture phase, file, selected node and number of nodes received in the
+current capture (not the total number of nodes in the Figma file). Progress notifications are coalesced
+to at most ten updates per second so a large file does not turn every wire message into several
+Chrome action API calls. Chrome always closes an action popup when it loses focus. Use its side-panel
+button to keep the same controls open while selecting frames on the canvas. The action badge keeps
+the compact state: `…` while connecting, `SYNC` while nodes arrive, `✓` when the graph has settled,
+`WAIT` while reconnecting, and `ERR` on an actionable failure. Reopen either surface to update the
+capture or detach; wire-frame counters are included only in copied error diagnostics.
 
-Raster image capture is opt-in and disabled by default. Enable **Захватывать растровые
-изображения** before connecting or recapturing when the selected design needs original photo/image
-bytes. The option is persisted in `chrome.storage.local`; only eligible `image/*` response bodies
+Raster image capture is opt-in and disabled by default. Enable **Сохранять исходные изображения**
+before connecting or recapturing when the selected design needs original photo/image bytes. The
+option is persisted in `chrome.storage.local`; only eligible `image/*` response bodies
 observed during the following reload are forwarded. An opt-in raster recapture bypasses Chrome's
 HTTP cache so repeated captures can obtain the response bodies instead of silently losing cached
 images; ordinary structure-only captures keep the cache enabled.
-When a node is selected, the popup and side panel show how many of its image fills have original
-bodies available. For a large subtree the count is explicitly marked as partial. If images are
-missing, open the relevant frame in Figma and choose **Считать заново**; changing the checkbox alone
-does not reload the tab.
+If an MCP result reports missing images, open the relevant frame in Figma and choose **Обновить
+данные**; changing the checkbox alone does not reload the tab.
 
 After changing files in the unpacked extension directory, press **Reload** on the extension card at
 `chrome://extensions` and reopen the popup or side panel. Chrome can otherwise keep the previous
