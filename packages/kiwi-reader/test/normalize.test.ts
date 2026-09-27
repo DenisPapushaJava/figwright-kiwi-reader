@@ -267,6 +267,52 @@ describe('normalizeCapturedNode', () => {
     });
   });
 
+  it('maps Kiwi all-small caps to the forced small caps shown by Figma', () => {
+    const node = normalizeCapturedNode({
+      id: '4:3',
+      name: 'Status label',
+      type: 'TEXT',
+      visible: true,
+      raw: {
+        textCase: 'ORIGINAL',
+        fontVariantCaps: 'ALL_SMALL',
+        fontSize: 12,
+        fontName: { family: 'Roboto', style: 'Regular' },
+        textData: { characters: 'готово' },
+      },
+      children: [],
+    });
+
+    expect(node.textCase).toBe('SMALL_CAPS_FORCED');
+    expect(SerializedNodeSchema.safeParse(node).success).toBe(true);
+  });
+
+  it('keeps a small-caps override scoped to its text run', () => {
+    const node = normalizeCapturedNode({
+      id: '4:4',
+      name: 'Mixed caps',
+      type: 'TEXT',
+      visible: true,
+      raw: {
+        textCase: 'ORIGINAL',
+        fontSize: 12,
+        fontName: { family: 'Roboto', style: 'Regular' },
+        textData: {
+          characters: 'ab',
+          characterStyleIDs: [0, 7],
+          styleOverrideTable: [{ styleID: 7, fontVariantCaps: 'ALL_SMALL' }],
+        },
+      },
+      children: [],
+    });
+
+    expect(node.textCase).toBe('mixed');
+    expect(node.segments?.map(segment => segment.textCase)).toEqual([
+      'ORIGINAL',
+      'SMALL_CAPS_FORCED',
+    ]);
+  });
+
   it('does not emit partial mixed runs when a referenced style id is missing', () => {
     const node = normalizeCapturedNode({
       id: '5:2',
@@ -317,6 +363,26 @@ describe('normalizeCapturedNode', () => {
       layoutSizingHorizontal: 'FIXED',
       layoutSizingVertical: 'HUG',
     });
+  });
+
+  it('treats omitted primary stack sizing as Hug on either node axis', () => {
+    for (const [mode, horizontal, vertical] of [
+      ['HORIZONTAL', 'HUG', 'FIXED'],
+      ['VERTICAL', 'FIXED', 'HUG'],
+    ]) {
+      const node = normalizeCapturedNode({
+        id: '7:7',
+        name: 'Auto layout',
+        type: 'FRAME',
+        visible: true,
+        raw: { stackMode: mode, stackCounterSizing: 'FIXED' },
+        children: [],
+      });
+      expect(node).toMatchObject({
+        layoutSizingHorizontal: horizontal,
+        layoutSizingVertical: vertical,
+      });
+    }
   });
 
   it('maps vertical stack sizing from the node axis, not the horizontal parent axis', () => {
@@ -385,6 +451,8 @@ describe('normalizeCapturedNode', () => {
       parentStackMode: 'VERTICAL',
       raw: {
         stackMode: 'HORIZONTAL',
+        stackPrimarySizing: 'FIXED',
+        stackCounterSizing: 'FIXED',
         stackChildPrimaryGrow: 1,
         stackChildAlignSelf: 'STRETCH',
         stackPositioning: 'ABSOLUTE',

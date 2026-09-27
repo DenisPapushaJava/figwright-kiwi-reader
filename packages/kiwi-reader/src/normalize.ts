@@ -332,6 +332,13 @@ const matchingFontWeight = (
   return undefined;
 };
 
+const normalizeTextCase = (source: UnknownRecord, fallback: UnknownRecord): string | undefined => {
+  const textCase = nonEmptyString(source.textCase ?? fallback.textCase);
+  const caps = nonEmptyString(source.fontVariantCaps ?? fallback.fontVariantCaps);
+  // Kiwi represents Figma's "Forced small caps" as ORIGINAL plus ALL_SMALL.
+  return textCase === 'ORIGINAL' && caps === 'ALL_SMALL' ? 'SMALL_CAPS_FORCED' : textCase;
+};
+
 type NormalizedTextStyle = Omit<SerializedTextSegment, 'characters' | 'start' | 'end'>;
 
 const normalizeTextStyle = (
@@ -350,7 +357,7 @@ const normalizeTextStyle = (
     matchingFontWeight(raw, text, fontName);
   const fills = normalizePaints(source.fillPaints) ?? [];
   const textDecoration = nonEmptyString(source.textDecoration ?? text.textDecoration) ?? 'NONE';
-  const textCase = nonEmptyString(source.textCase ?? text.textCase) ?? 'ORIGINAL';
+  const textCase = normalizeTextCase(source, text) ?? 'ORIGINAL';
   const lineHeight = normalizeLineHeight(source.lineHeight ?? text.lineHeight);
   const letterSpacing = normalizeLetterSpacing(source.letterSpacing ?? text.letterSpacing);
   const styleIds = normalizeStyleIds(source);
@@ -469,10 +476,11 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
   if (fontSize !== undefined) output.fontSize = fontSize;
   if (fontName !== undefined) output.fontName = fontName;
   if (fontWeight !== undefined) output.fontWeight = fontWeight;
+  const textCase = normalizeTextCase(text, raw);
+  if (textCase !== undefined) output.textCase = textCase;
   for (const [sourceKey, targetKey] of [
     ['textAlignHorizontal', 'textAlignHorizontal'],
     ['textAlignVertical', 'textAlignVertical'],
-    ['textCase', 'textCase'],
     ['textDecoration', 'textDecoration'],
     ['textAutoResize', 'textAutoResize'],
     ['textTruncation', 'textTruncation'],
@@ -598,8 +606,9 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
 
   const layout = normalizeAutoLayout(raw);
   if (layout !== undefined) output.layout = layout;
+  // Kiwi omits the primary-axis field for Hug, including on fixed-size-looking frames.
   const primarySizing =
-    raw.stackPrimarySizing === undefined ? 'FIXED' : kiwiStackSizing(raw.stackPrimarySizing);
+    raw.stackPrimarySizing === undefined ? 'HUG' : kiwiStackSizing(raw.stackPrimarySizing);
   const counterSizing =
     raw.stackCounterSizing === undefined ? 'FIXED' : kiwiStackSizing(raw.stackCounterSizing);
   // Stack sizing uses this node's axes; grow and stretch use its parent's axes.
