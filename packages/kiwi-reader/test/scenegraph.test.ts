@@ -437,6 +437,45 @@ describe('SceneGraphStore', () => {
     });
   });
 
+  it('uses the original master when Kiwi marks an absent swap with an all-ones GUID', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 143, localID: 71026 }, name: '*Pickers / Date', type: 'FRAME' },
+        {
+          guid: { sessionID: 143, localID: 71027 },
+          parentIndex: { guid: { sessionID: 143, localID: 71026 } },
+          name: 'Views=Date',
+          type: 'SYMBOL',
+          variantPropSpecs: [{ value: 'Date' }],
+        },
+        {
+          guid: { sessionID: 143, localID: 71028 },
+          parentIndex: { guid: { sessionID: 143, localID: 71027 } },
+          name: 'Date grid',
+          type: 'FRAME',
+        },
+        {
+          guid: { sessionID: 143, localID: 73391 },
+          name: '*Pickers / Date',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 143, localID: 71027 } },
+          overriddenSymbolID: { sessionID: 4294967295, localID: 4294967295 },
+        },
+      ],
+    });
+
+    expect(graph.findWithStats('143:73391')).toMatchObject({
+      resolvedInstances: 1,
+      unresolvedInstances: 0,
+      node: {
+        mainComponent: { id: '143:71027', name: 'Views=Date' },
+        componentProperties: { Views: { type: 'VARIANT', value: 'Date' } },
+        children: [{ name: 'Date grid' }],
+      },
+    });
+  });
+
   it('carries exposed text-property assignments through nested instances', () => {
     const graph = new SceneGraphStore();
     graph.apply({

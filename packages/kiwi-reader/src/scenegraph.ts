@@ -482,9 +482,14 @@ const booleanProperties = (
 };
 
 const instanceMasterId = (raw: KiwiNodeChange): string | null => {
-  const swapped = guidId(raw.overriddenSymbolID);
+  // Kiwi uses the all-ones GUID for an absent swap on otherwise valid instances.
+  const usableId = (value: unknown): string | null => {
+    const id = guidId(value);
+    return id === '4294967295:4294967295' ? null : id;
+  };
+  const swapped = usableId(raw.overriddenSymbolID);
   if (swapped !== null) return swapped;
-  return guidId(record(raw.symbolData)?.symbolID);
+  return usableId(record(raw.symbolData)?.symbolID);
 };
 
 /** Incrementally merges the node changes already delivered to the authenticated Figma tab. */
