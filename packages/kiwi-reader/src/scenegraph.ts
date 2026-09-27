@@ -427,27 +427,41 @@ const booleanProperties = (
   componentSet: KiwiNodeChange | undefined,
   inheritedAssignments: ReadonlyMap<string, boolean> | undefined,
 ): Record<string, { type: 'BOOLEAN'; value: boolean }> | undefined => {
-  const definitions = new Map<string, { name: string; defaultValue: boolean | undefined }>();
+  const definitions = new Map<
+    string,
+    { name: string; defaultValue: boolean | undefined; assignmentIds: string[] }
+  >();
   for (const owner of [componentSet, master]) {
     if (!Array.isArray(owner?.componentPropDefs)) continue;
     for (const item of owner.componentPropDefs) {
       const def = record(item);
-      if (def?.type !== 'BOOL' && def?.type !== 'BOOLEAN') continue;
+      if (def === null) continue;
       const id = guidId(def.id);
-      const name = def.name;
-      if (id === null || typeof name !== 'string' || name.trim() === '' || definitions.has(id)) {
-        continue;
-      }
+      if (id === null) continue;
+      const parentId = guidId(def.parentPropDefId);
+      const inherited = parentId === null ? undefined : definitions.get(parentId);
       const initial = record(def.initialValue)?.boolValue;
       const resolved = record(record(def.varValue)?.value)?.boolValue;
+      const defaultValue =
+        typeof initial === 'boolean'
+          ? initial
+          : typeof resolved === 'boolean'
+            ? resolved
+            : undefined;
+      // A variant's property definition may contain only its local id and a link to the
+      // component-set definition. Instances assign the local id, while the set owns the name.
+      if (inherited !== undefined) {
+        inherited.assignmentIds.unshift(id);
+        if (defaultValue !== undefined) inherited.defaultValue = defaultValue;
+        continue;
+      }
+      if (def.type !== 'BOOL' && def.type !== 'BOOLEAN') continue;
+      const name = def.name;
+      if (typeof name !== 'string' || name.trim() === '' || definitions.has(id)) continue;
       definitions.set(id, {
         name,
-        defaultValue:
-          typeof initial === 'boolean'
-            ? initial
-            : typeof resolved === 'boolean'
-              ? resolved
-              : undefined,
+        defaultValue,
+        assignmentIds: [id],
       });
     }
   }
@@ -456,7 +470,10 @@ const booleanProperties = (
   const assignments = inheritedBooleanAssignments(instance, inheritedAssignments);
   const properties: Record<string, { type: 'BOOLEAN'; value: boolean }> = {};
   for (const [id, definition] of definitions) {
-    const value = assignments.get(id) ?? definition.defaultValue;
+    const value =
+      definition.assignmentIds
+        .map(assignmentId => assignments.get(assignmentId))
+        .find(v => v !== undefined) ?? definition.defaultValue;
     if (value !== undefined) {
       properties[`${definition.name}#${id}`] = { type: 'BOOLEAN', value };
     }

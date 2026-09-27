@@ -617,6 +617,12 @@ describe('SceneGraphStore', () => {
           type: 'SYMBOL',
           componentKey: 'button-variant-key',
           variantPropSpecs: [{ value: 'Enabled' }, { value: 'M' }],
+          componentPropDefs: [
+            {
+              id: { sessionID: 900, localID: 2 },
+              parentPropDefId: { sessionID: 900, localID: 1 },
+            },
+          ],
         },
         {
           guid: { sessionID: 90, localID: 3 },
@@ -626,7 +632,7 @@ describe('SceneGraphStore', () => {
           visible: true,
           componentPropRefs: [
             {
-              defID: { sessionID: 900, localID: 1 },
+              defID: { sessionID: 900, localID: 2 },
               componentPropNodeField: 'VISIBLE',
             },
           ],
@@ -638,11 +644,17 @@ describe('SceneGraphStore', () => {
           symbolData: { symbolID: { sessionID: 90, localID: 2 } },
           componentPropAssignments: [
             {
-              defID: { sessionID: 900, localID: 1 },
+              defID: { sessionID: 900, localID: 2 },
               value: {},
               varValue: { value: { boolValue: false } },
             },
           ],
+        },
+        {
+          guid: { sessionID: 91, localID: 2 },
+          name: 'Button with default icon',
+          type: 'INSTANCE',
+          symbolData: { symbolID: { sessionID: 90, localID: 2 } },
         },
       ],
     });
@@ -671,6 +683,10 @@ describe('SceneGraphStore', () => {
         'Leading icon#900:1': { type: 'BOOLEAN', value: false },
       },
       children: [{ visible: false }],
+    });
+    expect(graph.findWithStats('91:2').node).toMatchObject({
+      componentProperties: { 'Leading icon#900:1': { type: 'BOOLEAN', value: true } },
+      children: [{ name: 'Leading icon', visible: true }],
     });
   });
 
