@@ -171,6 +171,17 @@ const mergeRecords = (base: UnknownRecord, patch: UnknownRecord): UnknownRecord 
     ) {
       continue;
     }
+    // Style references are alternatives (assetRef, guid, or the detached-style sentinel).
+    // Merging their members retains the master's assetRef and can reapply its old paint.
+    if (
+      key === 'styleIdForFill' ||
+      key === 'styleIdForStrokeFill' ||
+      key === 'styleIdForEffect' ||
+      key === 'styleIdForText'
+    ) {
+      output[key] = value;
+      continue;
+    }
     const current = record(output[key]);
     const next = record(value);
     output[key] = current !== null && next !== null ? mergeRecords(current, next) : value;

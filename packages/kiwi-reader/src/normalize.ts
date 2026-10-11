@@ -13,6 +13,7 @@ import {
 } from '@figwright/shared';
 
 import { nodeId, type CapturedNode, type KiwiGuid } from './scenegraph.js';
+import { sharedStyleReferenceId } from './shared-styles.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -257,24 +258,12 @@ const normalizeLetterSpacing = (value: unknown): SerializedLetterSpacing | undef
     : { unit, value: numericValue };
 };
 
-const assetKey = (value: unknown): string | undefined => {
-  const source = record(value);
-  return nonEmptyString(source?.key) ?? nonEmptyString(record(source?.assetRef)?.key);
-};
-
-const styleReferenceId = (value: unknown): string | undefined => {
-  const key = assetKey(value);
-  if (key !== undefined) return key;
-  const guid = record(record(value)?.guid) as KiwiGuid | null;
-  return guid === null ? undefined : `StyleID:${nodeId(guid)}`;
-};
-
 const normalizeStyleIds = (raw: UnknownRecord): SerializedStyleIds | undefined => {
   const output: SerializedStyleIds = {};
-  const fill = styleReferenceId(raw.styleIdForFill);
-  const stroke = styleReferenceId(raw.styleIdForStrokeFill);
-  const effect = styleReferenceId(raw.styleIdForEffect);
-  const text = styleReferenceId(raw.styleIdForText);
+  const fill = sharedStyleReferenceId(raw.styleIdForFill);
+  const stroke = sharedStyleReferenceId(raw.styleIdForStrokeFill);
+  const effect = sharedStyleReferenceId(raw.styleIdForEffect);
+  const text = sharedStyleReferenceId(raw.styleIdForText);
   if (fill !== undefined) output.fill = fill;
   if (stroke !== undefined) output.stroke = stroke;
   if (effect !== undefined) output.effect = effect;
