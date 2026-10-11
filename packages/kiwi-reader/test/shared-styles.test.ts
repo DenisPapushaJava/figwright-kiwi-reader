@@ -38,6 +38,217 @@ const styledButton = {
 } as const;
 
 describe('Kiwi shared style resolution', () => {
+  const detachedStyle = { guid: guid(4294967295, 4294967295) };
+  const bluePaint = [{ type: 'SOLID', color: { r: 0, g: 0.4667, b: 1, a: 1 } }];
+  const orangePaint = [{ type: 'SOLID', color: { r: 1, g: 0.4667, b: 0, a: 1 }, opacity: 0.6 }];
+
+  it.each([
+    ['styleIdForFill', 'fillPaints', 'fills', 'fill', bluePaint, orangePaint],
+    ['styleIdForStrokeFill', 'strokePaints', 'strokes', 'stroke', bluePaint, orangePaint],
+    [
+      'styleIdForEffect',
+      'effects',
+      'effects',
+      'effect',
+      [{ type: 'DROP_SHADOW', color: { r: 0, g: 0.4667, b: 1, a: 1 }, radius: 4 }],
+      [{ type: 'DROP_SHADOW', color: { r: 1, g: 0.4667, b: 0, a: 0.6 }, radius: 8 }],
+    ],
+  ] as const)(
+    'preserves a detached instance %s override instead of reapplying the master style',
+    (reference, value, normalizedField, styleField, original, override) => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [
+          { guid: guid(80, 1), key: 'base-style', styleType: 'FILL', [value]: original },
+          { guid: guid(81, 1), name: 'Checkbox', type: 'SYMBOL' },
+          {
+            guid: guid(81, 2),
+            parentIndex: { guid: guid(81, 1) },
+            overrideKey: guid(304, 176),
+            type: 'VECTOR',
+            [reference]: { assetRef: { key: 'base-style' } },
+            [value]: original,
+          },
+          {
+            guid: guid(82, 1),
+            type: 'INSTANCE',
+            symbolData: {
+              symbolID: guid(81, 1),
+              symbolOverrides: [
+                {
+                  guidPath: { guids: [guid(304, 176)] },
+                  [reference]: detachedStyle,
+                  [value]: override,
+                },
+              ],
+            },
+            derivedSymbolData: [{ guidPath: { guids: [guid(304, 176)] }, opacity: 0.8 }],
+          },
+          { guid: guid(82, 2), type: 'INSTANCE', symbolData: { symbolID: guid(81, 1) } },
+        ],
+      });
+
+      const result = graph.findWithStats('82:1');
+      const child = normalizeCapturedNode(result.node!).children?.[0];
+      expect(result.node?.children[0]?.raw[reference]).toEqual(detachedStyle);
+      expect(child?.[normalizedField]?.[0]).toMatchObject({ color: { r: 1, g: 0.4667, b: 0 } });
+      expect(child?.styleIds?.[styleField]).toBeUndefined();
+      expect(child?.opacity).toBe(0.8);
+      expect(result).toMatchObject({ sharedStyleBindings: 0, unresolvedSharedStyles: 0 });
+      expect(
+        normalizeCapturedNode(graph.find('82:2')!).children?.[0]?.[normalizedField]?.[0],
+      ).toMatchObject({ color: { r: 0, g: 0.4667, b: 1 } });
+    },
+  );
+
+  it('replaces a keyed style with a GUID style through nested instance overrides', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: guid(83, 1), key: 'blue-style', styleType: 'FILL', fillPaints: bluePaint },
+        redStyle,
+        { guid: guid(84, 1), type: 'SYMBOL' },
+        {
+          guid: guid(84, 2),
+          parentIndex: { guid: guid(84, 1) },
+          overrideKey: guid(304, 176),
+          type: 'VECTOR',
+          styleIdForFill: { assetRef: { key: 'blue-style' } },
+          fillPaints: bluePaint,
+        },
+        { guid: guid(85, 1), type: 'SYMBOL' },
+        {
+          guid: guid(85, 2),
+          parentIndex: { guid: guid(85, 1) },
+          overrideKey: guid(850, 2),
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: guid(84, 1),
+            symbolOverrides: [
+              {
+                guidPath: { guids: [guid(304, 176)] },
+                styleIdForFill: { guid: redStyle.guid },
+              },
+            ],
+          },
+        },
+        {
+          guid: guid(86, 1),
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: guid(85, 1),
+            symbolOverrides: [
+              {
+                guidPath: { guids: [guid(850, 2), guid(304, 176)] },
+                styleIdForFill: detachedStyle,
+                fillPaints: orangePaint,
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    const direct = normalizeCapturedNode(graph.find('85:2')!).children?.[0];
+    expect(direct?.fills?.[0]).toMatchObject({ color: { r: 0.85, g: 0.1253, b: 0.1253 } });
+    expect(direct?.styleIds).toEqual({ fill: 'StyleID:8:1072' });
+    const nested = normalizeCapturedNode(graph.find('86:1')!).children?.[0]?.children?.[0];
+    expect(nested?.fills?.[0]).toMatchObject({ color: { r: 1, g: 0.4667, b: 0 }, opacity: 0.6 });
+    expect(nested?.styleIds).toBeUndefined();
+  });
+
+  it.each(['styleIdForFill', 'styleIdForStrokeFill', 'styleIdForEffect', 'styleIdForText'])(
+    'does not advertise a detached %s as an unresolved style',
+    reference => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [{ guid: guid(87, 1), type: 'TEXT', [reference]: detachedStyle }],
+      });
+      const result = graph.findWithStats('87:1');
+      expect(normalizeCapturedNode(result.node!).styleIds).toBeUndefined();
+      expect(result).toMatchObject({ sharedStyleBindings: 0, unresolvedSharedStyles: 0 });
+    },
+  );
+
+  it('keeps gradient and empty-paint overrides after detaching a style and invalidates cached colors', () => {
+    const graph = new SceneGraphStore();
+    const gradient = [
+      {
+        type: 'GRADIENT_LINEAR',
+        opacity: 0.4,
+        transform: { m00: 1, m01: 0, m02: 0, m10: 0, m11: 1, m12: 0 },
+        stops: [
+          { position: 0, color: { r: 1, g: 0, b: 0, a: 1 } },
+          { position: 1, color: { r: 0, g: 0, b: 1, a: 0.5 } },
+        ],
+      },
+    ];
+    const symbolData = (fillPaints: unknown[]) => ({
+      symbolID: guid(88, 1),
+      symbolOverrides: [
+        {
+          guidPath: { guids: [guid(88, 2)] },
+          styleIdForFill: detachedStyle,
+          fillPaints,
+        },
+      ],
+    });
+    graph.apply({
+      nodeChanges: [
+        { guid: guid(88, 1), type: 'SYMBOL' },
+        {
+          guid: guid(88, 2),
+          parentIndex: { guid: guid(88, 1) },
+          type: 'VECTOR',
+          styleIdForFill: { guid: redStyle.guid },
+          fillPaints: bluePaint,
+        },
+        redStyle,
+        { guid: guid(89, 1), type: 'INSTANCE', symbolData: symbolData(gradient) },
+      ],
+    });
+    const cache = new NormalizedNodeCache();
+    const initial = cache.read(graph, '89:1', 8, 2_000);
+    expect(cache.normalize(initial)?.children?.[0]).toMatchObject({
+      fills: [{ type: 'GRADIENT_LINEAR', opacity: 0.4, gradientStops: gradient[0]!.stops }],
+    });
+    graph.apply({ nodeChanges: [{ guid: guid(89, 1), symbolData: symbolData([]) }] });
+    const updated = cache.read(graph, '89:1', 8, 2_000);
+    expect(updated).not.toBe(initial);
+    expect(cache.normalize(updated)?.children?.[0]?.fills).toEqual([]);
+    expect(cache.normalize(updated)?.children?.[0]?.styleIds).toBeUndefined();
+  });
+
+  it('keeps a detached mixed-text run color without reporting a fake style binding', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: guid(90, 1),
+          type: 'TEXT',
+          fontName: { family: 'Inter', style: 'Regular' },
+          fontSize: 14,
+          fillPaints: bluePaint,
+          textData: {
+            characters: 'AB',
+            characterStyleIDs: [0, 1],
+            styleOverrideTable: [
+              { styleID: 1, styleIdForFill: detachedStyle, fillPaints: orangePaint },
+            ],
+          },
+        },
+      ],
+    });
+    const result = graph.findWithStats('90:1');
+    const text = normalizeCapturedNode(result.node!);
+    expect(text.segments?.[1]).toMatchObject({
+      characters: 'B',
+      fills: [{ color: { r: 1, g: 0.4667, b: 0 }, opacity: 0.6 }],
+    });
+    expect(text.segments?.[1]?.styleIds).toBeUndefined();
+    expect(result).toMatchObject({ sharedStyleBindings: 0, unresolvedSharedStyles: 0 });
+  });
+
   it('uses the shared fill style instead of the stale inline paint fallback', () => {
     const graph = new SceneGraphStore();
     graph.apply({ nodeChanges: [redStyle, styledButton] });

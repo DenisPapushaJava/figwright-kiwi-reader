@@ -36,6 +36,7 @@ const initialState = tabId => ({
   title: null,
   fileKey: null,
   selectedNodeId: null,
+  selectedNodeName: null,
   schemaReady: false,
   nodes: 0,
   decodedFrames: 0,
@@ -51,7 +52,7 @@ const getState = tabId => tabStates.get(tabId) ?? initialState(tabId);
 const badgeForState = state => {
   switch (state.phase) {
     case 'ready':
-      return { text: '✓', color: '#16803c', title: 'FigLens: макет готов к чтению' };
+      return { text: '✓', color: '#16803c', title: 'FigLens: структура макета доступна' };
     case 'reading':
       return { text: 'SYNC', color: '#2563eb', title: 'FigLens: чтение узлов Figma' };
     case 'connecting':
@@ -175,6 +176,7 @@ const applyCaptureStatus = session => {
     title: session.title,
     fileKey: session.fileKey,
     selectedNodeId: session.selectedNodeId,
+    selectedNodeName: session.selectedNodeName ?? null,
     schemaReady: session.schemaReady,
     nodes: session.nodes,
     decodedFrames: session.decodedFrames,
@@ -320,6 +322,7 @@ const connectBridge = () => {
           title: message.session?.title ?? getState(message.tabId).title,
           fileKey: message.session?.fileKey ?? getState(message.tabId).fileKey,
           selectedNodeId: message.session?.selectedNodeId ?? getState(message.tabId).selectedNodeId,
+          selectedNodeName: getState(message.tabId).selectedNodeName,
           schemaReady: message.session?.schemaReady ?? false,
           nodes: message.session?.nodes ?? 0,
           decodedFrames: message.session?.decodedFrames ?? 0,
@@ -386,6 +389,7 @@ const reloadCapture = async tabId => {
     nodes: 0,
     decodedFrames: 0,
     ignoredFrames: 0,
+    selectedNodeName: null,
     captureImages,
   });
   await sendHello(tabId, true);
@@ -496,9 +500,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       captureImages = message.captureImages !== false;
       await chrome.storage.local.set({ captureImages });
       if (!captureImages) {
-        imageRequests.get(tabId)?.clear();
-        sentImageUrls.get(tabId)?.clear();
+        for (const attachedTabId of attachedTabs) {
+          imageRequests.get(attachedTabId)?.clear();
+          sentImageUrls.get(attachedTabId)?.clear();
+        }
       }
+      await Promise.allSettled([...attachedTabs].map(attachedTabId => sendHello(attachedTabId)));
       return publishState(tabId, { captureImages });
     }
     if (message.type === 'disconnect') {

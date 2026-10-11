@@ -208,9 +208,64 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         clientInfo: { name: 'kiwi-wire-test', version: '0' },
       });
       expect(initialized).not.toHaveProperty('error');
+      const initialization = initialized.result as {
+        instructions: string;
+        capabilities: { prompts?: unknown };
+      };
+      expect(initialization.instructions).toContain('Start with browser_status');
+      expect(initialization.instructions).toContain('get_implementation_context');
+      expect(initialization.instructions).toContain('actual absolute project rootDir');
+      expect(initialization.instructions.length).toBeLessThan(2_000);
+      expect(initialization.capabilities).toHaveProperty('prompts');
       child.stdin.write(
         `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`,
       );
+
+      const promptList = await send('prompts/list');
+      expect(promptList).not.toHaveProperty('error');
+      const prompts = (
+        promptList.result as { prompts: Array<{ name: string; arguments: unknown[] }> }
+      ).prompts;
+      expect(prompts.map(prompt => prompt.name)).toEqual([
+        'figlens_codex',
+        'figlens_claude',
+        'figlens_cursor',
+      ]);
+      for (const prompt of prompts) {
+        expect(prompt.arguments).toEqual([
+          expect.objectContaining({ name: 'rootDir', required: false }),
+          expect.objectContaining({ name: 'nodeId', required: false }),
+        ]);
+        // eslint-disable-next-line no-await-in-loop -- verify each advertised profile over the actual wire
+        const response = await send('prompts/get', {
+          name: prompt.name,
+          arguments: {
+            rootDir: assetDirectory,
+            nodeId: 'https://www.figma.com/design/file/Test?node-id=6-140',
+          },
+        });
+        expect(response).not.toHaveProperty('error');
+        const messages = (
+          response.result as {
+            messages: Array<{ role: string; content: { type: string; text: string } }>;
+          }
+        ).messages;
+        expect(messages).toHaveLength(1);
+        expect(messages[0]).toMatchObject({ role: 'user', content: { type: 'text' } });
+        expect(messages[0]!.content.text).toContain(JSON.stringify(assetDirectory));
+        expect(messages[0]!.content.text).toContain('6-140');
+        expect(messages[0]!.content.text).toContain('sectionPlan');
+        expect(messages[0]!.content.text).toContain(
+          'Change project files only when implementation is requested',
+        );
+      }
+      const selectionPrompt = await send('prompts/get', { name: 'figlens_codex' });
+      expect(selectionPrompt).not.toHaveProperty('error');
+      const invalidPrompt = await send('prompts/get', {
+        name: 'figlens_codex',
+        arguments: { rootDir: ' ' },
+      });
+      expect(invalidPrompt).toHaveProperty('error');
 
       const listed = await send('tools/list');
       const result = listed.result as {

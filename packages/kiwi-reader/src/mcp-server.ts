@@ -26,6 +26,7 @@ import {
 import { minimumProjectedNodeBytes } from './projection-budget.js';
 import { saveReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, type CapturedNode } from './scenegraph.js';
+import { FIGLENS_SERVER_INSTRUCTIONS, registerFigLensPrompts } from './startup-prompts.js';
 import { mapProjectTokens } from './token-grounding.js';
 
 const DEFAULT_MAX_NODES = 2_000;
@@ -433,10 +434,11 @@ export const createKiwiMcpServer = (
   const server = new McpServer(
     { name: 'figlens', version: '0.1.0' },
     {
-      instructions:
-        'Read-only Figma browser capture. For implementation in an existing codebase, call get_implementation_context once with that project rootDir; it returns the full design tree plus component, icon, and token grounding. Use get_design_context for design-only inspection. Follow sectionPlan for large selections. No Figma writes are available.',
+      instructions: FIGLENS_SERVER_INSTRUCTIONS,
     },
   );
+
+  registerFigLensPrompts(server);
 
   server.registerTool(
     'browser_status',

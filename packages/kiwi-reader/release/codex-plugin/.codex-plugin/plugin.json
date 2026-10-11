@@ -1,6 +1,6 @@
 {
-  "name": "fk",
-  "version": "0.5.1",
+  "name": "fl",
+  "version": "0.6.0",
   "description": "Read the current Figma browser selection through the local FigLens bridge.",
   "author": {
     "name": "DenisPapusha"
@@ -11,7 +11,7 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "FK",
+    "displayName": "FL",
     "shortDescription": "Read Figma frames from the browser.",
     "longDescription": "Connects Codex to the local read-only FigLens reader so any task can inspect the selected Figma frame or a node from a Figma URL.",
     "developerName": "DenisPapusha",

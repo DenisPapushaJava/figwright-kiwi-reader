@@ -27,6 +27,18 @@ describe('Kiwi extension capture options', () => {
     expect(popupScript).toContain("request('set-capture-options'");
     expect(popupScript).toContain("error.code = 'EXTENSION_RELOAD_REQUIRED'");
     expect(popupScript).toContain('currentState?.captureOptionsSupported !== true');
+    expect(popup).toContain('Сохранять исходные изображения');
+    expect(sidepanel).toContain('Сохранять исходные изображения');
+    expect(popup).not.toContain('id="image-availability"');
+    expect(sidepanel).not.toContain('id="image-availability"');
+    expect(popup).toContain('id="node-count"');
+    expect(sidepanel).toContain('id="node-count"');
+    expect(popup).toContain('узлов прочитано');
+    expect(sidepanel).toContain('узлов прочитано');
+    expect(popup).not.toContain('id="frame-count"');
+    expect(sidepanel).not.toContain('id="frame-count"');
+    expect(popup).toContain('Обновление перезагрузит вкладку Figma.');
+    expect(sidepanel).toContain('Обновление перезагрузит вкладку Figma.');
   });
 
   it('always answers an accepted runtime message if publishing its error state also fails', async () => {

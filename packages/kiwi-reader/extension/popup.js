@@ -1,17 +1,19 @@
 const elements = {
+  extensionVersion: document.querySelector('#extension-version'),
   statusDot: document.querySelector('#status-dot'),
   statusTitle: document.querySelector('#status-title'),
   statusDetail: document.querySelector('#status-detail'),
-  progress: document.querySelector('#progress'),
   errorCard: document.querySelector('#error-card'),
-  errorCode: document.querySelector('#error-code'),
   copyDiagnostics: document.querySelector('#copy-diagnostics'),
+  fileCard: document.querySelector('#file-card'),
   fileTitle: document.querySelector('#file-title'),
-  nodeId: document.querySelector('#node-id'),
+  nodeName: document.querySelector('#node-name'),
+  captureSummary: document.querySelector('#capture-summary'),
   nodeCount: document.querySelector('#node-count'),
-  frameCount: document.querySelector('#frame-count'),
+  captureOptions: document.querySelector('#capture-options'),
   captureImages: document.querySelector('#capture-images'),
   captureImagesHelp: document.querySelector('#capture-images-help'),
+  recaptureNote: document.querySelector('#recapture-note'),
   pin: document.querySelector('#pin-action'),
   primary: document.querySelector('#primary-action'),
   disconnect: document.querySelector('#disconnect-action'),
@@ -19,26 +21,32 @@ const elements = {
 
 const phaseCopy = {
   idle: ['Макет не подключён', 'Нажмите кнопку, чтобы передать макет AI-ассистенту'],
-  connecting: ['Подключаю локальный MCP', 'Проверяю связь на 127.0.0.1'],
+  connecting: ['Подключаю макет', 'Проверяю связь с локальным сервисом'],
   reloading: ['Перезагружаю вкладку', 'После загрузки начнётся чтение макета'],
-  waiting: ['Жду данные Figma', 'Ищу схему fig-wire и первые узлы'],
-  reading: ['Читаю структуру макета', 'Счётчик растёт по мере получения узлов'],
-  ready: ['Макет готов к чтению', 'AI-ассистент уже может запрашивать выбранный узел'],
-  reconnecting: ['Связь с MCP потеряна', 'Переподключаюсь автоматически'],
-  error: ['Не удалось завершить чтение', 'Скопируйте диагностику или повторите захват'],
+  waiting: ['Жду данные Figma', 'Чтение начнётся после загрузки макета'],
+  reading: ['Читаю структуру макета', 'Большой макет может потребовать больше времени'],
+  ready: ['Структура макета доступна', 'AI-ассистент может запрашивать полученные узлы'],
+  reconnecting: ['Связь с локальным сервисом потеряна', 'Восстанавливаю подключение'],
+  error: ['Не удалось завершить чтение', 'Попробуйте обновить данные'],
 };
 
 let tabId = null;
 let currentState = null;
 let supportedTab = false;
 const isSidePanel = document.body.classList.contains('side-panel');
-const captureImagesHelp = 'Включите для фото; макетные заглушки можно пропустить';
 const reloadExtensionHelp =
   'Обновите расширение на chrome://extensions, затем откройте панель снова';
 
-const formatNumber = value => new Intl.NumberFormat('ru-RU').format(value ?? 0);
+const setText = (element, value) => {
+  if (element.textContent !== value) element.textContent = value;
+};
+
+const extensionVersion = chrome.runtime.getManifest().version;
+setText(elements.extensionVersion, `v${extensionVersion}`);
+elements.extensionVersion.title = `Версия расширения ${extensionVersion}`;
 
 const cleanTitle = title => title?.replace(/\s*[–-]\s*Figma\s*$/i, '').trim() || 'Макет Figma';
+const formatNumber = value => new Intl.NumberFormat('ru-RU').format(value ?? 0);
 
 const diagnostics = state =>
   JSON.stringify(
@@ -53,7 +61,7 @@ const diagnostics = state =>
       decodedFrames: state?.decodedFrames ?? 0,
       ignoredFrames: state?.ignoredFrames ?? 0,
       captureImages: state?.captureImages === true,
-      extensionVersion: chrome.runtime.getManifest().version,
+      extensionVersion,
     },
     null,
     2,
@@ -88,35 +96,50 @@ const render = state => {
   currentState = state;
   const phase = state?.phase ?? 'idle';
   const [title, fallbackDetail] = phaseCopy[phase] ?? phaseCopy.idle;
-  elements.statusTitle.textContent = supportedTab ? title : 'Откройте макет Figma';
-  elements.statusDetail.textContent = supportedTab
-    ? state?.errorMessage || fallbackDetail
-    : 'Расширение работает только на figma.com';
+  setText(elements.statusTitle, supportedTab ? title : 'Откройте макет Figma');
+  setText(
+    elements.statusDetail,
+    supportedTab
+      ? state?.errorMessage || fallbackDetail
+      : 'Расширение работает только на figma.com',
+  );
   elements.statusDot.className = `status-dot ${
-    phase === 'ready' ? 'ready' : phase === 'error' ? 'error' : phase === 'idle' ? '' : 'active'
+    phase === 'ready'
+      ? 'ready'
+      : phase === 'error'
+        ? 'error'
+        : phase === 'reconnecting'
+          ? 'warning'
+          : phase === 'idle'
+            ? ''
+            : 'active'
   }`;
-  elements.progress.className = `progress ${
-    phase === 'ready' ? 'ready' : phase === 'error' ? 'error' : phase === 'idle' ? '' : 'active'
-  }`;
-  elements.errorCard.hidden = phase !== 'error' && phase !== 'reconnecting';
-  elements.errorCode.textContent = state?.errorCode ?? 'UNKNOWN_ERROR';
+  elements.errorCard.hidden = phase !== 'error';
+  elements.fileCard.hidden = state?.attached !== true;
   elements.fileTitle.textContent = state?.title ? cleanTitle(state.title) : 'Не выбран';
   elements.fileTitle.title = state?.title ?? '';
-  elements.nodeId.textContent = state?.selectedNodeId ?? '—';
-  elements.nodeCount.textContent = formatNumber(state?.nodes);
-  elements.frameCount.textContent = formatNumber(state?.decodedFrames);
+  const selectedNodeName = state?.selectedNodeName?.trim() || null;
+  elements.nodeName.textContent =
+    selectedNodeName ?? state?.selectedNodeId ?? 'Выберите узел в Figma';
+  elements.nodeName.title = selectedNodeName ?? state?.selectedNodeId ?? '';
+  elements.captureSummary.hidden = state?.attached !== true;
+  setText(elements.nodeCount, formatNumber(state?.nodes));
   elements.captureImages.checked = state?.captureImages === true;
+  elements.captureOptions.hidden = !supportedTab;
   const captureOptionsSupported = state?.captureOptionsSupported === true;
   elements.captureImagesHelp.textContent = captureOptionsSupported
-    ? captureImagesHelp
+    ? state?.attached
+      ? 'Для фото и текстур. После изменения нажмите «Обновить данные».'
+      : 'Для фото и текстур из макета.'
     : reloadExtensionHelp;
 
   const busy = ['connecting', 'reloading'].includes(phase);
   if (elements.pin) elements.pin.disabled = !supportedTab;
   elements.primary.disabled = !supportedTab || busy;
-  elements.primary.textContent = state?.attached ? 'Считать заново' : 'Подключить макет';
+  elements.primary.textContent = state?.attached ? 'Обновить данные' : 'Подключить макет';
   elements.disconnect.hidden = !state?.attached;
   elements.disconnect.disabled = busy;
+  elements.recaptureNote.hidden = !state?.attached;
   elements.captureImages.disabled = !supportedTab || busy || !captureOptionsSupported;
 };
 

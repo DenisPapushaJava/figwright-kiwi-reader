@@ -10,6 +10,12 @@ export interface StdioServerEntry {
   args: string[];
 }
 
+interface PreviousServer {
+  command: string;
+  proxyPath: string;
+  name?: string;
+}
+
 const isObject = (value: unknown): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -51,12 +57,19 @@ export const installStdioServer = async (
   path: string,
   name: string,
   entry: StdioServerEntry,
-  previous?: { command: string; proxyPath: string },
+  previous?: PreviousServer,
 ): Promise<void> => {
   const config = await readConfig(path);
   const servers = serverMap(config);
   assertOwnedEntry(path, name, servers[name], entry, previous);
   servers[name] = entry;
+  if (
+    previous?.name &&
+    previous.name !== name &&
+    sameEntry(servers[previous.name], previous.command, previous.proxyPath)
+  ) {
+    delete servers[previous.name];
+  }
   await writeConfig(path, config);
 };
 
@@ -65,7 +78,7 @@ const assertOwnedEntry = (
   name: string,
   current: unknown,
   entry: StdioServerEntry,
-  previous?: { command: string; proxyPath: string },
+  previous?: PreviousServer,
 ): void => {
   const owned =
     current === undefined ||
@@ -82,7 +95,7 @@ export const checkStdioServerInstall = async (
   path: string,
   name: string,
   entry: StdioServerEntry,
-  previous?: { command: string; proxyPath: string },
+  previous?: PreviousServer,
 ): Promise<void> => {
   const config = await readConfig(path);
   const servers = serverMap(config);
@@ -105,7 +118,7 @@ export const removeStdioServer = async (
 };
 
 const main = async (): Promise<void> => {
-  const [mode, path, name, command, proxyPath, previousCommand, previousProxyPath] =
+  const [mode, path, name, command, proxyPath, previousCommand, previousProxyPath, previousName] =
     process.argv.slice(2);
   if ((mode === 'check' || mode === 'install') && path && name && command && proxyPath) {
     const operation = mode === 'check' ? checkStdioServerInstall : installStdioServer;
@@ -114,7 +127,11 @@ const main = async (): Promise<void> => {
       name,
       { type: 'stdio', command, args: [proxyPath] },
       previousCommand && previousProxyPath
-        ? { command: previousCommand, proxyPath: previousProxyPath }
+        ? {
+            command: previousCommand,
+            proxyPath: previousProxyPath,
+            ...(previousName ? { name: previousName } : {}),
+          }
         : undefined,
     );
     return;
@@ -124,7 +141,7 @@ const main = async (): Promise<void> => {
     return;
   }
   throw new Error(
-    'Usage: client-config.mjs <check|install|remove> <config> <name> <node> <proxy> [previous-node previous-proxy]',
+    'Usage: client-config.mjs <check|install|remove> <config> <name> <node> <proxy> [previous-node previous-proxy previous-name]',
   );
 };
 

@@ -94,7 +94,7 @@ export interface CaptureStatus {
 
 interface CaptureStatusMessage {
   type: 'capture-status';
-  session: CaptureSessionStatus;
+  session: CaptureSessionStatus & { selectedNodeName: string | null };
 }
 
 interface CaptureErrorMessage {
@@ -236,7 +236,6 @@ export class KiwiCaptureSession {
   captureLimitReached = false;
   captureErrorActive = false;
   lastActivityAt = Date.now();
-
   constructor(
     readonly tabId: number,
     hello: ExtensionHello,
@@ -600,7 +599,14 @@ export class KiwiCaptureServer extends EventEmitter {
     if (timer !== undefined) clearTimeout(timer);
     this.statusTimers.delete(session.tabId);
     this.lastStatusAt.set(session.tabId, Date.now());
-    const message: CaptureStatusMessage = { type: 'capture-status', session: session.status };
+    const message: CaptureStatusMessage = {
+      type: 'capture-status',
+      session: {
+        ...session.status,
+        selectedNodeName:
+          session.selectedNodeId === null ? null : session.graph.nameOf(session.selectedNodeId),
+      },
+    };
     socket.send(JSON.stringify(message));
     this.emit('status', this.status);
   }

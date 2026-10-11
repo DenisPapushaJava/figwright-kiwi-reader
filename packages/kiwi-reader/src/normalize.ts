@@ -13,6 +13,7 @@ import {
 } from '@figwright/shared';
 
 import { nodeId, type CapturedNode, type KiwiGuid } from './scenegraph.js';
+import { sharedStyleReferenceId } from './shared-styles.js';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -257,24 +258,12 @@ const normalizeLetterSpacing = (value: unknown): SerializedLetterSpacing | undef
     : { unit, value: numericValue };
 };
 
-const assetKey = (value: unknown): string | undefined => {
-  const source = record(value);
-  return nonEmptyString(source?.key) ?? nonEmptyString(record(source?.assetRef)?.key);
-};
-
-const styleReferenceId = (value: unknown): string | undefined => {
-  const key = assetKey(value);
-  if (key !== undefined) return key;
-  const guid = record(record(value)?.guid) as KiwiGuid | null;
-  return guid === null ? undefined : `StyleID:${nodeId(guid)}`;
-};
-
 const normalizeStyleIds = (raw: UnknownRecord): SerializedStyleIds | undefined => {
   const output: SerializedStyleIds = {};
-  const fill = styleReferenceId(raw.styleIdForFill);
-  const stroke = styleReferenceId(raw.styleIdForStrokeFill);
-  const effect = styleReferenceId(raw.styleIdForEffect);
-  const text = styleReferenceId(raw.styleIdForText);
+  const fill = sharedStyleReferenceId(raw.styleIdForFill);
+  const stroke = sharedStyleReferenceId(raw.styleIdForStrokeFill);
+  const effect = sharedStyleReferenceId(raw.styleIdForEffect);
+  const text = sharedStyleReferenceId(raw.styleIdForText);
   if (fill !== undefined) output.fill = fill;
   if (stroke !== undefined) output.stroke = stroke;
   if (effect !== undefined) output.effect = effect;
@@ -332,6 +321,13 @@ const matchingFontWeight = (
   return undefined;
 };
 
+const normalizeTextCase = (source: UnknownRecord, fallback: UnknownRecord): string | undefined => {
+  const textCase = nonEmptyString(source.textCase ?? fallback.textCase);
+  const caps = nonEmptyString(source.fontVariantCaps ?? fallback.fontVariantCaps);
+  // Kiwi represents Figma's "Forced small caps" as ORIGINAL plus ALL_SMALL.
+  return textCase === 'ORIGINAL' && caps === 'ALL_SMALL' ? 'SMALL_CAPS_FORCED' : textCase;
+};
+
 type NormalizedTextStyle = Omit<SerializedTextSegment, 'characters' | 'start' | 'end'>;
 
 const normalizeTextStyle = (
@@ -350,7 +346,7 @@ const normalizeTextStyle = (
     matchingFontWeight(raw, text, fontName);
   const fills = normalizePaints(source.fillPaints) ?? [];
   const textDecoration = nonEmptyString(source.textDecoration ?? text.textDecoration) ?? 'NONE';
-  const textCase = nonEmptyString(source.textCase ?? text.textCase) ?? 'ORIGINAL';
+  const textCase = normalizeTextCase(source, text) ?? 'ORIGINAL';
   const lineHeight = normalizeLineHeight(source.lineHeight ?? text.lineHeight);
   const letterSpacing = normalizeLetterSpacing(source.letterSpacing ?? text.letterSpacing);
   const styleIds = normalizeStyleIds(source);
@@ -469,10 +465,11 @@ const normalizeText = (raw: UnknownRecord, output: SerializedNode): void => {
   if (fontSize !== undefined) output.fontSize = fontSize;
   if (fontName !== undefined) output.fontName = fontName;
   if (fontWeight !== undefined) output.fontWeight = fontWeight;
+  const textCase = normalizeTextCase(text, raw);
+  if (textCase !== undefined) output.textCase = textCase;
   for (const [sourceKey, targetKey] of [
     ['textAlignHorizontal', 'textAlignHorizontal'],
     ['textAlignVertical', 'textAlignVertical'],
-    ['textCase', 'textCase'],
     ['textDecoration', 'textDecoration'],
     ['textAutoResize', 'textAutoResize'],
     ['textTruncation', 'textTruncation'],
@@ -598,8 +595,9 @@ const normalizeNodeUnchecked = (node: CapturedNode): SerializedNode => {
 
   const layout = normalizeAutoLayout(raw);
   if (layout !== undefined) output.layout = layout;
+  // Kiwi omits the primary-axis field for Hug, including on fixed-size-looking frames.
   const primarySizing =
-    raw.stackPrimarySizing === undefined ? 'FIXED' : kiwiStackSizing(raw.stackPrimarySizing);
+    raw.stackPrimarySizing === undefined ? 'HUG' : kiwiStackSizing(raw.stackPrimarySizing);
   const counterSizing =
     raw.stackCounterSizing === undefined ? 'FIXED' : kiwiStackSizing(raw.stackCounterSizing);
   // Stack sizing uses this node's axes; grow and stretch use its parent's axes.

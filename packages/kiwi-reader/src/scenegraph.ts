@@ -171,6 +171,17 @@ const mergeRecords = (base: UnknownRecord, patch: UnknownRecord): UnknownRecord 
     ) {
       continue;
     }
+    // Style references are alternatives (assetRef, guid, or the detached-style sentinel).
+    // Merging their members retains the master's assetRef and can reapply its old paint.
+    if (
+      key === 'styleIdForFill' ||
+      key === 'styleIdForStrokeFill' ||
+      key === 'styleIdForEffect' ||
+      key === 'styleIdForText'
+    ) {
+      output[key] = value;
+      continue;
+    }
     const current = record(output[key]);
     const next = record(value);
     output[key] = current !== null && next !== null ? mergeRecords(current, next) : value;
@@ -421,10 +432,75 @@ const variantProperties = (
   return properties;
 };
 
+const booleanProperties = (
+  instance: KiwiNodeChange,
+  master: KiwiNodeChange,
+  componentSet: KiwiNodeChange | undefined,
+  inheritedAssignments: ReadonlyMap<string, boolean> | undefined,
+): Record<string, { type: 'BOOLEAN'; value: boolean }> | undefined => {
+  const definitions = new Map<
+    string,
+    { name: string; defaultValue: boolean | undefined; assignmentIds: string[] }
+  >();
+  for (const owner of [componentSet, master]) {
+    if (!Array.isArray(owner?.componentPropDefs)) continue;
+    for (const item of owner.componentPropDefs) {
+      const def = record(item);
+      if (def === null) continue;
+      const id = guidId(def.id);
+      if (id === null) continue;
+      const parentId = guidId(def.parentPropDefId);
+      const inherited = parentId === null ? undefined : definitions.get(parentId);
+      const initial = record(def.initialValue)?.boolValue;
+      const resolved = record(record(def.varValue)?.value)?.boolValue;
+      const defaultValue =
+        typeof initial === 'boolean'
+          ? initial
+          : typeof resolved === 'boolean'
+            ? resolved
+            : undefined;
+      // A variant's property definition may contain only its local id and a link to the
+      // component-set definition. Instances assign the local id, while the set owns the name.
+      if (inherited !== undefined) {
+        inherited.assignmentIds.unshift(id);
+        if (defaultValue !== undefined) inherited.defaultValue = defaultValue;
+        continue;
+      }
+      if (def.type !== 'BOOL' && def.type !== 'BOOLEAN') continue;
+      const name = def.name;
+      if (typeof name !== 'string' || name.trim() === '' || definitions.has(id)) continue;
+      definitions.set(id, {
+        name,
+        defaultValue,
+        assignmentIds: [id],
+      });
+    }
+  }
+  if (definitions.size === 0) return undefined;
+
+  const assignments = inheritedBooleanAssignments(instance, inheritedAssignments);
+  const properties: Record<string, { type: 'BOOLEAN'; value: boolean }> = {};
+  for (const [id, definition] of definitions) {
+    const value =
+      definition.assignmentIds
+        .map(assignmentId => assignments.get(assignmentId))
+        .find(v => v !== undefined) ?? definition.defaultValue;
+    if (value !== undefined) {
+      properties[`${definition.name}#${id}`] = { type: 'BOOLEAN', value };
+    }
+  }
+  return Object.keys(properties).length === 0 ? undefined : properties;
+};
+
 const instanceMasterId = (raw: KiwiNodeChange): string | null => {
-  const swapped = guidId(raw.overriddenSymbolID);
+  // Kiwi uses the all-ones GUID for an absent swap on otherwise valid instances.
+  const usableId = (value: unknown): string | null => {
+    const id = guidId(value);
+    return id === '4294967295:4294967295' ? null : id;
+  };
+  const swapped = usableId(raw.overriddenSymbolID);
   if (swapped !== null) return swapped;
-  return guidId(record(raw.symbolData)?.symbolID);
+  return usableId(record(raw.symbolData)?.symbolID);
 };
 
 /** Incrementally merges the node changes already delivered to the authenticated Figma tab. */
@@ -540,6 +616,10 @@ export class SceneGraphStore {
 
   has(id: string): boolean {
     return this.nodes.has(normalizeNodeId(id));
+  }
+
+  nameOf(id: string): string | null {
+    return this.nodes.get(normalizeNodeId(id))?.name?.trim() || null;
   }
 
   /**
@@ -687,12 +767,21 @@ export class SceneGraphStore {
             instanceCycles++;
           } else {
             resolvedInstances++;
-            componentProperties = variantProperties(master);
             const componentSetId =
               master.parentIndex?.guid === undefined ? null : nodeId(master.parentIndex.guid);
             const componentSet =
               componentSetId === null ? undefined : this.nodes.get(componentSetId);
             if (componentSetId !== null) dependencies.add(componentSetId);
+            const variants = variantProperties(master);
+            const booleans = booleanProperties(
+              raw,
+              master,
+              componentSet,
+              context?.booleanAssignments,
+            );
+            if (variants !== undefined || booleans !== undefined) {
+              componentProperties = { ...variants, ...booleans };
+            }
             mainComponent = {
               id: masterId,
               name: master.name ?? '',

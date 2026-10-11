@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "fk": {
+    "fl": {
       "command": "node",
       "args": ["REPLACED_BY_INSTALLER"],
       "startup_timeout_sec": 120,

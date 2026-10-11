@@ -242,8 +242,7 @@ export const collectDesignAssetInventory = (
     }
     for (const image of paintImages(node)) {
       const id = image.hash ?? `${node.id}:unknown`;
-      const available =
-        image.hash !== null && (networkAssets?.resolveHash(image.hash) ?? null) !== null;
+      const available = image.hash !== null && networkAssets?.hasHash(image.hash) === true;
       entries.push({
         assetId: `image:${id}`,
         nodeId: node.id,

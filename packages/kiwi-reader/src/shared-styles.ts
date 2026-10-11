@@ -90,11 +90,13 @@ const lookup = (reference: unknown, index: SharedStyleIndex): KiwiNodeChange | n
   return null;
 };
 
-const styleId = (reference: unknown): string | null => {
+export const sharedStyleReferenceId = (reference: unknown): string | undefined => {
+  const guid = guidId(reference);
+  // An all-ones GUID explicitly detaches the style; it is not a missing style definition.
+  if (guid === '4294967295:4294967295') return undefined;
   const key = assetKey(reference);
   if (key !== null) return key;
-  const guid = guidId(reference);
-  return guid === null ? null : `StyleID:${guid}`;
+  return guid === null ? undefined : `StyleID:${guid}`;
 };
 
 interface StyleField {
@@ -121,8 +123,8 @@ export class SharedStyleResolver {
       let used = false;
       for (const field of STYLE_FIELDS) {
         const reference = source[field.reference];
-        const id = styleId(reference);
-        if (id === null) continue;
+        const id = sharedStyleReferenceId(reference);
+        if (id === undefined) continue;
         used = true;
         this.stats.bindings++;
         const style = lookup(reference, this.index);
