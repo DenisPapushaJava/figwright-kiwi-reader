@@ -22,7 +22,7 @@ async function fixture(extensionVersion = '0.3.1', pluginVersion = extensionVers
       join(extensionDir, 'manifest.json'),
       `{"manifest_version":3,"version":"${extensionVersion}","name":"Reader"}\n`,
     ),
-    writeFile(join(pluginDir, 'plugin.json'), `{"name":"fk","version":"${pluginVersion}"}\n`),
+    writeFile(join(pluginDir, 'plugin.json'), `{"name":"fl","version":"${pluginVersion}"}\n`),
   ]);
   return root;
 }
@@ -75,7 +75,7 @@ describe('FigLens release preparation', () => {
       'utf8',
     );
     expect(extension).toBe('{"manifest_version":3,"version":"0.3.2","name":"Reader"}\n');
-    expect(plugin).toBe('{"name":"fk","version":"0.3.2"}\n');
+    expect(plugin).toBe('{"name":"fl","version":"0.3.2"}\n');
   });
 
   it('refuses to bump manifests that have drifted apart', async () => {

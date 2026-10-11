@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
   [string]$InstallDir = (Join-Path $env:LOCALAPPDATA 'FigwrightKiwi'),
-  [string]$PluginDir = (Join-Path $HOME 'plugins\fk'),
+  [string]$PluginDir = (Join-Path $HOME 'plugins\fl'),
   [string]$MarketplacePath = (Join-Path $HOME '.agents\plugins\marketplace.json'),
   [string]$CursorConfigPath = (Join-Path $HOME '.cursor\mcp.json'),
   [ValidateSet('Codex', 'Cursor', 'ClaudeCode')]
@@ -123,14 +123,25 @@ if (Test-Path -LiteralPath $statePath) {
 $previousClients = @(Get-OptionalProperty $previousState 'clients')
 $previousNodeCommand = [string](Get-OptionalProperty $previousState 'nodeCommand')
 $previousProxyEntry = [string](Get-OptionalProperty $previousState 'proxyEntry')
+$previousCursorName = [string](Get-OptionalProperty $previousState 'cursorServerName')
+if (-not $previousCursorName) { $previousCursorName = 'fk' }
+$previousClaudeName = [string](Get-OptionalProperty $previousState 'claudeServerName')
+if (-not $previousClaudeName) { $previousClaudeName = 'fk' }
+$previousCodexSelector = [string](Get-OptionalProperty $previousState 'codexPluginSelector')
+$previousCursorNode = [string](Get-OptionalProperty $previousState 'cursorNodeCommand')
+if (-not $previousCursorNode) { $previousCursorNode = $previousNodeCommand }
+$previousCursorProxy = [string](Get-OptionalProperty $previousState 'cursorProxyEntry')
+if (-not $previousCursorProxy) { $previousCursorProxy = $previousProxyEntry }
+$previousClaudeProxy = [string](Get-OptionalProperty $previousState 'claudeProxyEntry')
+if (-not $previousClaudeProxy) { $previousClaudeProxy = $previousProxyEntry }
 $serverTarget = Join-Path $InstallDir 'server'
 $extensionTarget = Join-Path $InstallDir 'extension'
 $proxyTarget = Join-Path $serverTarget 'stdio-proxy.mjs'
 $hubTarget = Join-Path $serverTarget 'hub.mjs'
 $clientConfigTarget = Join-Path $serverTarget 'client-config.mjs'
-$cursorOwnershipArgs = @($CursorConfigPath, 'fk', $node.Source, $proxyTarget)
-if ($previousNodeCommand -and $previousProxyEntry -and ($previousClients -contains 'Cursor')) {
-  $cursorOwnershipArgs += @($previousNodeCommand, $previousProxyEntry)
+$cursorOwnershipArgs = @($CursorConfigPath, 'fl', $node.Source, $proxyTarget)
+if ($previousCursorNode -and $previousCursorProxy -and ($previousClients -contains 'Cursor')) {
+  $cursorOwnershipArgs += @($previousCursorNode, $previousCursorProxy, $previousCursorName)
 }
 if (Test-SelectedClient 'Cursor') {
   & $node.Source $clientConfigEntry check @cursorOwnershipArgs
@@ -138,20 +149,25 @@ if (Test-SelectedClient 'Cursor') {
 }
 
 $claude = $null
-$existingClaude = ''
-$existingClaudeCode = 1
+$claudeNamesToReplace = @()
 if (Test-SelectedClient 'ClaudeCode') {
   $claude = Get-Command claude -ErrorAction SilentlyContinue
   if ($null -ne $claude) {
-    $existingClaude = (& $claude.Source mcp get fk 2>&1 | Out-String)
-    $existingClaudeCode = $LASTEXITCODE
-    if ($existingClaudeCode -eq 0) {
+    $names = @('fl')
+    if (($previousClients -contains 'ClaudeCode') -and $previousClaudeName -ne 'fl') {
+      $names += $previousClaudeName
+    }
+    foreach ($name in $names) {
+      $existingClaude = (& $claude.Source mcp get $name 2>&1 | Out-String)
+      if ($LASTEXITCODE -ne 0) { continue }
       $ownedPrevious =
         ($previousClients -contains 'ClaudeCode') -and
-        $previousProxyEntry -and
-        ($existingClaude.IndexOf($previousProxyEntry, [StringComparison]::OrdinalIgnoreCase) -ge 0)
-      if (-not $ownedPrevious) {
-        throw 'Claude Code already has an MCP server named fk that is not owned by FigLens.'
+        $previousClaudeProxy -and
+        ($existingClaude.IndexOf($previousClaudeProxy, [StringComparison]::OrdinalIgnoreCase) -ge 0)
+      if ($ownedPrevious) {
+        $claudeNamesToReplace += $name
+      } elseif ($name -eq 'fl') {
+        throw 'Claude Code already has an MCP server named fl that is not owned by FigLens.'
       }
     }
   }
@@ -160,12 +176,12 @@ if (Test-SelectedClient 'ClaudeCode') {
 if ((Test-SelectedClient 'Codex') -and -not $SkipCodexInstall -and
   (Test-Path -LiteralPath $MarketplacePath)) {
   $marketplacePreflight = Get-Content -Raw -LiteralPath $MarketplacePath | ConvertFrom-Json
-  $existingFkEntries = @($marketplacePreflight.plugins | Where-Object { $_.name -eq 'fk' })
-  foreach ($entry in $existingFkEntries) {
+  $existingFlEntries = @($marketplacePreflight.plugins | Where-Object { $_.name -eq 'fl' })
+  foreach ($entry in $existingFlEntries) {
     $source = Get-OptionalProperty $entry 'source'
     $sourcePath = [string](Get-OptionalProperty $source 'path')
-    if ($sourcePath -ne './plugins/fk') {
-      throw 'Codex marketplace already has a plugin named fk that is not owned by FigLens.'
+    if ($sourcePath -ne './plugins/fl') {
+      throw 'Codex marketplace already has a plugin named fl that is not owned by FigLens.'
     }
   }
 }
@@ -213,7 +229,7 @@ if (-not $hubReady) {
 
 $mcp = [ordered]@{
   mcpServers = [ordered]@{
-    fk = [ordered]@{
+    fl = [ordered]@{
       command = $node.Source
       args = @($proxyTarget)
       cwd = $InstallDir
@@ -233,6 +249,11 @@ Write-Utf8NoBom -Path $pluginManifestPath -Content ($pluginManifest | ConvertTo-
 
 $installedClients = @($previousClients)
 $codexPluginSelector = [string](Get-OptionalProperty $previousState 'codexPluginSelector')
+$cursorServerName = $previousCursorName
+$claudeServerName = $previousClaudeName
+$cursorNodeCommand = $previousCursorNode
+$cursorProxyEntry = $previousCursorProxy
+$claudeProxyEntry = $previousClaudeProxy
 
 if ((Test-SelectedClient 'Codex') -and -not $SkipCodexInstall) {
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $MarketplacePath) | Out-Null
@@ -246,21 +267,34 @@ if ((Test-SelectedClient 'Codex') -and -not $SkipCodexInstall) {
     }
   }
 
-  $existingPlugins = @($marketplace.plugins | Where-Object { $_.name -ne 'fk' })
-  $fkEntry = [pscustomobject]@{
-    name = 'fk'
-    source = [pscustomobject]@{ source = 'local'; path = './plugins/fk' }
+  $migrateCodex = ($previousClients -contains 'Codex') -and
+    $previousCodexSelector -eq "fk@$($marketplace.name)" -and
+    @($marketplace.plugins | Where-Object {
+      $_.name -eq 'fk' -and
+        (Get-OptionalProperty (Get-OptionalProperty $_ 'source') 'path') -eq './plugins/fk'
+    }).Count -eq 1
+  $existingPlugins = @($marketplace.plugins | Where-Object {
+    $sourcePath = [string](Get-OptionalProperty (Get-OptionalProperty $_ 'source') 'path')
+    $_.name -ne 'fl' -and -not ($migrateCodex -and $_.name -eq 'fk' -and $sourcePath -eq './plugins/fk')
+  })
+  $flEntry = [pscustomobject]@{
+    name = 'fl'
+    source = [pscustomobject]@{ source = 'local'; path = './plugins/fl' }
     policy = [pscustomobject]@{ installation = 'AVAILABLE'; authentication = 'ON_INSTALL' }
     category = 'Productivity'
   }
-  $marketplace.plugins = @($existingPlugins) + @($fkEntry)
+  $marketplace.plugins = @($existingPlugins) + @($flEntry)
   Write-Utf8NoBom -Path $MarketplacePath -Content ($marketplace | ConvertTo-Json -Depth 10)
 
   $codex = Get-Command codex -ErrorAction SilentlyContinue
   if ($null -ne $codex) {
-    $codexPluginSelector = "fk@$($marketplace.name)"
+    $codexPluginSelector = "fl@$($marketplace.name)"
     & $codex.Source plugin add $codexPluginSelector --json
     if ($LASTEXITCODE -ne 0) { throw 'Codex plugin installation failed.' }
+    if ($migrateCodex) {
+      & $codex.Source plugin remove $previousCodexSelector --json
+      if ($LASTEXITCODE -ne 0) { throw 'Could not remove the previous Codex plugin registration.' }
+    }
     $installedClients += 'Codex'
   } else {
     Write-Warning 'Codex CLI was not found in PATH. Its plugin source is ready for later installation.'
@@ -273,14 +307,17 @@ if (Test-SelectedClient 'Cursor') {
   & $node.Source $clientConfigTarget install @cursorOwnershipArgs
   if ($LASTEXITCODE -ne 0) { throw 'Cursor MCP configuration failed.' }
   $installedClients += 'Cursor'
+  $cursorServerName = 'fl'
+  $cursorNodeCommand = $node.Source
+  $cursorProxyEntry = $proxyTarget
 }
 
 if (Test-SelectedClient 'ClaudeCode') {
   if ($null -eq $claude) {
     Write-Warning 'Claude Code CLI was not found in PATH. Its MCP server was not registered.'
   } else {
-    if ($existingClaudeCode -eq 0) {
-      & $claude.Source mcp remove fk --scope user
+    if ($claudeNamesToReplace -contains 'fl') {
+      & $claude.Source mcp remove fl --scope user
       if ($LASTEXITCODE -ne 0) { throw 'Could not update the previous Claude Code registration.' }
     }
     $claudeConfig = [ordered]@{
@@ -288,9 +325,15 @@ if (Test-SelectedClient 'ClaudeCode') {
       command = $node.Source
       args = @($proxyTarget)
     } | ConvertTo-Json -Compress
-    & $claude.Source mcp add-json --scope user fk $claudeConfig
+    & $claude.Source mcp add-json --scope user fl $claudeConfig
     if ($LASTEXITCODE -ne 0) { throw 'Claude Code MCP configuration failed.' }
+    foreach ($name in @($claudeNamesToReplace | Where-Object { $_ -ne 'fl' })) {
+      & $claude.Source mcp remove $name --scope user
+      if ($LASTEXITCODE -ne 0) { throw 'Could not remove the previous Claude Code registration.' }
+    }
     $installedClients += 'ClaudeCode'
+    $claudeServerName = 'fl'
+    $claudeProxyEntry = $proxyTarget
   }
 }
 
@@ -302,6 +345,11 @@ $state = [ordered]@{
   marketplacePath = $MarketplacePath
   codexPluginSelector = $codexPluginSelector
   cursorConfigPath = $CursorConfigPath
+  cursorServerName = $cursorServerName
+  claudeServerName = $claudeServerName
+  cursorNodeCommand = $cursorNodeCommand
+  cursorProxyEntry = $cursorProxyEntry
+  claudeProxyEntry = $claudeProxyEntry
   clients = @($installedClients | Sort-Object -Unique)
   nodeCommand = $node.Source
   extensionPath = $extensionTarget
@@ -321,5 +369,5 @@ Write-Host "Chrome extension: $extensionTarget"
 Write-Host "Shared MCP hub: $hubTarget"
 Write-Host "Configured clients: $(@($state.clients) -join ', ')"
 Write-Host 'Open chrome://extensions, enable Developer mode, choose Load unpacked, and select that folder.'
-Write-Host 'Restart your MCP clients, then ask @fk to read the selected Figma frame.'
+Write-Host 'Restart your MCP clients, then ask @fl to read the selected Figma frame.'
 Write-Host "Clean uninstall: powershell -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'uninstall.ps1')`""

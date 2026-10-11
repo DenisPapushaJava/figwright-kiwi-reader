@@ -1,15 +1,15 @@
 ---
 name: figma-browser-reader
-description: Read the current Figma browser selection or a node from a Figma design URL through the local read-only FigLens reader. Use when the user mentions @fk, asks to read or inspect a selected Figma frame, requests design context from a Figma URL, or wants browser Figma data for implementation. Do not use this skill to edit Figma.
+description: Read the current Figma browser selection or a node from a Figma design URL through the local read-only FigLens reader. Use when the user mentions @fl, asks to read or inspect a selected Figma frame, requests design context from a Figma URL, or wants browser Figma data for implementation. Do not use this skill to edit Figma.
 ---
 
 # Figma browser reader
 
-Use the `fk` MCP tools to read design data captured by the local Chrome extension. This route is
+Use the `fl` MCP tools to read design data captured by the local Chrome extension. This route is
 strictly read-only and does not use Figma REST API tokens, OAuth, or the Figma Plugin API.
 
 1. Call `browser_status` before reading. If the extension is not connected or no file has been
-   decoded, report the exact status and ask the user to start capture from the FK extension.
+   decoded, report the exact status and ask the user to start capture from the FigLens extension.
 2. For implementation in an existing codebase, call `get_implementation_context` with that
    codebase's absolute `rootDir`. It returns full design data, assets, project profile, components,
    icons, and token candidates in one bounded response. Use the individual `get_design_context`,

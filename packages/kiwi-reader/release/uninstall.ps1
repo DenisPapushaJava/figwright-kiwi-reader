@@ -49,15 +49,25 @@ if ($recordedInstallDir -and
 $clients = @(Get-OptionalProperty $state 'clients')
 if ($clients.Count -eq 0) { $clients = @('Codex') }
 $proxyEntry = [string](Get-OptionalProperty $state 'proxyEntry')
+$cursorServerName = [string](Get-OptionalProperty $state 'cursorServerName')
+if (-not $cursorServerName) { $cursorServerName = 'fk' }
+$claudeServerName = [string](Get-OptionalProperty $state 'claudeServerName')
+if (-not $claudeServerName) { $claudeServerName = 'fk' }
+$cursorNodeCommand = [string](Get-OptionalProperty $state 'cursorNodeCommand')
+if (-not $cursorNodeCommand) { $cursorNodeCommand = $nodeCommand }
+$cursorProxyEntry = [string](Get-OptionalProperty $state 'cursorProxyEntry')
+if (-not $cursorProxyEntry) { $cursorProxyEntry = $proxyEntry }
+$claudeProxyEntry = [string](Get-OptionalProperty $state 'claudeProxyEntry')
+if (-not $claudeProxyEntry) { $claudeProxyEntry = $proxyEntry }
 
 if ($clients -contains 'Cursor') {
   $cursorConfigPath = [string](Get-OptionalProperty $state 'cursorConfigPath')
   $clientConfigEntry = [string](Get-OptionalProperty $state 'clientConfigEntry')
   if ($cursorConfigPath -and $clientConfigEntry -and (Test-Path -LiteralPath $clientConfigEntry)) {
-    $cursorResult = (& $nodeCommand $clientConfigEntry remove $cursorConfigPath fk $nodeCommand $proxyEntry).Trim()
+    $cursorResult = (& $nodeCommand $clientConfigEntry remove $cursorConfigPath $cursorServerName $cursorNodeCommand $cursorProxyEntry).Trim()
     if ($LASTEXITCODE -ne 0) { throw 'Cursor MCP cleanup failed.' }
     if ($cursorResult -eq 'changed') {
-      Write-Warning 'Cursor MCP server fk was changed after installation and was preserved.'
+      Write-Warning "Cursor MCP server $cursorServerName was changed after installation and was preserved."
     }
   }
 }
@@ -67,14 +77,14 @@ if ($clients -contains 'ClaudeCode') {
   if ($null -eq $claude) {
     Write-Warning 'Claude Code CLI was not found; its MCP registration was preserved.'
   } else {
-    $existingClaude = (& $claude.Source mcp get fk 2>&1 | Out-String)
+    $existingClaude = (& $claude.Source mcp get $claudeServerName 2>&1 | Out-String)
     if ($LASTEXITCODE -eq 0) {
-      if ($proxyEntry -and
-        $existingClaude.IndexOf($proxyEntry, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-        & $claude.Source mcp remove fk --scope user
+      if ($claudeProxyEntry -and
+        $existingClaude.IndexOf($claudeProxyEntry, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+        & $claude.Source mcp remove $claudeServerName --scope user
         if ($LASTEXITCODE -ne 0) { throw 'Claude Code MCP cleanup failed.' }
       } else {
-        Write-Warning 'Claude Code MCP server fk was changed after installation and was preserved.'
+        Write-Warning "Claude Code MCP server $claudeServerName was changed after installation and was preserved."
       }
     }
   }
@@ -95,7 +105,8 @@ if (($clients -contains 'Codex') -and $marketplacePath -and (Test-Path -LiteralP
   $marketplace.plugins = @($marketplace.plugins | Where-Object {
     $source = Get-OptionalProperty $_ 'source'
     $sourcePath = [string](Get-OptionalProperty $source 'path')
-    $_.name -ne 'fk' -or $sourcePath -ne './plugins/fk'
+    -not (($_.name -eq 'fl' -and $sourcePath -eq './plugins/fl') -or
+      ($_.name -eq 'fk' -and $sourcePath -eq './plugins/fk'))
   })
   Write-Utf8NoBom -Path $marketplacePath -Content ($marketplace | ConvertTo-Json -Depth 10)
 }
@@ -146,7 +157,7 @@ if ($pluginDir -and (Test-Path -LiteralPath $pluginDir)) {
   $safePluginDir = Assert-SafeDirectory $pluginDir '.codex-plugin\plugin.json'
   $pluginManifest = Get-Content -Raw -LiteralPath (Join-Path $safePluginDir '.codex-plugin\plugin.json') |
     ConvertFrom-Json
-  if ($pluginManifest.name -ne 'fk') {
+  if ($pluginManifest.name -notin @('fl', 'fk')) {
     throw "Refusing to remove plugin directory with unexpected identity: $safePluginDir"
   }
   Remove-Item -LiteralPath $safePluginDir -Recurse -Force
