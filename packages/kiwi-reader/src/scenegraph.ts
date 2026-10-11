@@ -634,6 +634,17 @@ export class SceneGraphStore {
     return this.nodes.get(normalizeNodeId(id))?.name?.trim() || null;
   }
 
+  /** Match the DOM's active page only when its exact name identifies one captured canvas. */
+  uniquePageId(name: string): string | null {
+    let matched: string | null = null;
+    for (const [id, raw] of this.nodes) {
+      if (raw.type !== 'CANVAS' || raw.name !== name) continue;
+      if (matched !== null) return null;
+      matched = id;
+    }
+    return matched;
+  }
+
   /**
    * Summarizes every direct child without expanding a depth-first read first. This keeps a large
    * first section from consuming the normal read budget and hiding its later siblings from an MCP

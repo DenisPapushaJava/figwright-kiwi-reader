@@ -25,6 +25,26 @@ const visibilityBinding = (
       };
 
 describe('SceneGraphStore', () => {
+  it('identifies a page by its exact DOM name only when the captured canvas is unique', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 0, localID: 1 }, name: 'Page', type: 'CANVAS' },
+        { guid: { sessionID: 0, localID: 2 }, name: 'Other', type: 'CANVAS' },
+        { guid: { sessionID: 1, localID: 1 }, name: 'Page', type: 'FRAME' },
+      ],
+    });
+    expect(graph.uniquePageId('Page')).toBe('0:1');
+    expect(graph.uniquePageId('page')).toBeNull();
+    expect(graph.uniquePageId('missing')).toBeNull();
+    graph.apply({ nodeChanges: [{ guid: { sessionID: 0, localID: 2 }, name: 'Page' }] });
+    expect(graph.uniquePageId('Page')).toBeNull();
+    graph.apply({ nodeChanges: [{ guid: { sessionID: 0, localID: 2 }, phase: 'REMOVED' }] });
+    expect(graph.uniquePageId('Page')).toBe('0:1');
+    graph.clear();
+    expect(graph.uniquePageId('Page')).toBeNull();
+  });
+
   it('merges node changes and builds an ordered subtree', () => {
     const graph = new SceneGraphStore();
     expect(

@@ -17,7 +17,11 @@ import { encodeRgbaPng } from '../src/png-diff.js';
 const DIST_ENTRY = join(import.meta.dirname, '..', 'dist', 'mcp.mjs');
 const HUB_ENTRY = join(import.meta.dirname, '..', 'dist', 'hub.mjs');
 
-const captureFixture = (mode: 'small' | 'large' | 'unicode' = 'small') => {
+const captureFixture = (
+  mode: 'small' | 'large' | 'unicode' = 'small',
+  rootType = 'FRAME',
+  includePages = false,
+) => {
   const schema = parseSchema(`
     message Guid {
       int sessionID = 1;
@@ -104,14 +108,29 @@ const captureFixture = (mode: 'small' | 'large' | 'unicode' = 'small') => {
   const messageFrame = zstdCompressSync(
     codec.encodeMessage({
       nodeChanges: [
-        { guid: { sessionID: 6, localID: 140 }, name: 'Root', type: 'FRAME' },
+        ...(includePages
+          ? [
+              { guid: { sessionID: 0, localID: 1 }, name: 'Current page', type: 'CANVAS' },
+              { guid: { sessionID: 0, localID: 2 }, name: 'Other page', type: 'CANVAS' },
+              { guid: { sessionID: 0, localID: 3 }, name: 'Duplicate', type: 'CANVAS' },
+              { guid: { sessionID: 0, localID: 4 }, name: 'Duplicate', type: 'CANVAS' },
+            ]
+          : []),
+        {
+          guid: { sessionID: 6, localID: 140 },
+          name: 'Root',
+          type: rootType,
+          ...(includePages
+            ? { parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' } }
+            : {}),
+        },
         ...masters,
         ...children,
       ],
     }),
   );
   return {
-    expectedNodes: children.length + masters.length + 1,
+    expectedNodes: children.length + masters.length + 1 + (includePages ? 4 : 0),
     schemaPayload: Buffer.from(schemaFrame).toString('base64'),
     messagePayload: Buffer.from(messageFrame).toString('base64'),
   };
@@ -314,7 +333,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         extensionSocket?.once('open', resolve);
         extensionSocket?.once('error', reject);
       });
-      const fixture = captureFixture();
+      const fixture = captureFixture('small', 'FRAME', true);
       const ready = new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(
           () => reject(new Error('Timed out waiting for captured nodes')),
@@ -362,6 +381,9 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(selection).toMatchObject({
         fileKey: 'file',
         selectedNodeId: '6:140',
+        selectionSource: 'url',
+        selectionVerified: false,
+        complete: false,
         nodes: [{ id: '6:140', name: 'Root', type: 'FRAME' }],
       });
 
@@ -384,6 +406,188 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           },
         ],
       });
+
+      // The URL can stay on the page while two independent elements are selected.
+      let browserSelection: {
+        url: string;
+        count: number | null;
+        nodeIds: string[];
+        complete: boolean;
+        pageName: string | null;
+      } = {
+        url: 'https://www.figma.com/design/file/Test?node-id=0-1',
+        pageName: 'Current page',
+        count: 2,
+        nodeIds: ['6:141', '6:142'],
+        complete: true,
+      };
+      const replyToSelection = (data: unknown) => {
+        const request = JSON.parse(String(data)) as {
+          type: string;
+          tabId: number;
+          requestId: string;
+        };
+        if (request.type !== 'capture-selection-request') return;
+        extensionSocket?.send(
+          JSON.stringify({
+            type: 'capture-selection',
+            tabId: request.tabId,
+            requestId: request.requestId,
+            selection: browserSelection,
+          }),
+        );
+      };
+      extensionSocket.on('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: browserSelection.url,
+          selectionCapture: true,
+          captureImages: true,
+        }),
+      );
+      // The next status confirms that the hello has been applied before making MCP requests.
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
+      const multiple = parseToolText(
+        await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+      );
+      expect(multiple).toMatchObject({
+        selectionCount: 2,
+        selectedNodeIds: ['6:141', '6:142'],
+        selectedNodeId: null,
+        selectionSource: 'browser-dom',
+        selectionVerified: true,
+        complete: true,
+        nodes: [
+          { id: '6:141', name: 'Child' },
+          { id: '6:142', name: 'Button instance' },
+        ],
+        missingNodeIds: [],
+      });
+      const ambiguous = await send('tools/call', {
+        name: 'get_design_context',
+        arguments: { tabId: 17 },
+      });
+      expect(ambiguous.result).toMatchObject({ isError: true });
+      expect(JSON.stringify(ambiguous.result)).toContain('2 elements are selected');
+      browserSelection = { ...browserSelection, count: 1, nodeIds: ['6:142'] };
+      const singleContext = parseToolText(
+        await send('tools/call', {
+          name: 'get_design_context',
+          arguments: { tabId: 17, depth: 0 },
+        }),
+      );
+      expect(singleContext).toMatchObject({ nodes: [{ id: '6:142', name: 'Button instance' }] });
+      browserSelection = { ...browserSelection, count: 0, nodeIds: [] };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({ nodes: [], selectionCount: 0, selectedNodeIds: [], complete: true });
+      // A stale URL points at another page; the active page comes from the browser DOM.
+      browserSelection = {
+        ...browserSelection,
+        url: 'https://www.figma.com/design/file/Test?node-id=0-2',
+      };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({
+        selectedNodeIds: [],
+        currentPage: { id: '0:1', name: 'Current page', type: 'CANVAS' },
+      });
+      const overview = parseToolText(
+        await send('tools/call', {
+          name: 'get_design_context',
+          arguments: { tabId: 17, depth: 32 },
+        }),
+      );
+      expect(overview).toMatchObject({
+        scope: 'page-overview',
+        fallbackReason: 'no-selection',
+        selectionCount: 0,
+        selectionVerified: true,
+        nodes: [{ id: '0:1', name: 'Current page', type: 'CANVAS' }],
+        sectionPlan: {
+          sections: [{ nodeId: '6:140', name: 'Root', type: 'FRAME' }],
+          sectionsTruncated: false,
+        },
+        capture: { visited: 1 },
+      });
+      expect(overview).not.toHaveProperty('assets');
+      expect(
+        parseToolText(
+          await send('tools/call', {
+            name: 'get_implementation_context',
+            arguments: { tabId: 17, rootDir: assetDirectory },
+          }),
+        ),
+      ).toMatchObject({
+        schemaVersion: 'figwright-kiwi-implementation@1',
+        scope: 'page-overview',
+        nodes: [{ id: '0:1' }],
+        deferred: ['design', 'assets', 'project', 'grounding'],
+      });
+      expect(
+        parseToolText(
+          await send('tools/call', {
+            name: 'get_design_context',
+            arguments: { tabId: 17, nodeId: '6:141' },
+          }),
+        ),
+      ).toMatchObject({ nodes: [{ id: '6:141', name: 'Child' }] });
+      for (const pageName of ['Duplicate', 'Missing page', null]) {
+        browserSelection = { ...browserSelection, pageName };
+        const unresolvedPage = await send('tools/call', {
+          name: 'get_design_context',
+          arguments: { tabId: 17 },
+        });
+        expect(unresolvedPage.result).toMatchObject({ isError: true });
+        expect(JSON.stringify(unresolvedPage.result)).toContain(
+          'current page could not be identified uniquely',
+        );
+      }
+      browserSelection = {
+        ...browserSelection,
+        count: null,
+        pageName: 'Current page',
+        complete: false,
+      };
+      const unknownSelection = await send('tools/call', {
+        name: 'get_design_context',
+        arguments: { tabId: 17 },
+      });
+      expect(unknownSelection.result).toMatchObject({ isError: true });
+      expect(JSON.stringify(unknownSelection.result)).toContain('selection is incomplete');
+      browserSelection = { ...browserSelection, count: 2, nodeIds: ['6:141'], complete: false };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({
+        selectionCount: 2,
+        selectedNodeIds: ['6:141'],
+        selectionVerified: false,
+        complete: false,
+      });
+      browserSelection = { ...browserSelection, count: 1, nodeIds: ['123:456'], complete: true };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({ nodes: [], selectedNodeIds: ['123:456'], missingNodeIds: ['123:456'] });
+      extensionSocket.off('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+          captureImages: true,
+        }),
+      );
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
 
       const context = parseToolText(
         await send('tools/call', {
@@ -790,6 +994,96 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(statusAfterPreflight.sessions[0]?.normalizationCache.normalizations).toBe(
         normalizationsBefore,
       );
+      browserSelection = { ...browserSelection, count: 1, nodeIds: ['6:141'], complete: true };
+      extensionSocket.on('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: browserSelection.url,
+          selectionCapture: true,
+        }),
+      );
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
+      const oversizedSelection = parseToolText(
+        await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+      );
+      expect(oversizedSelection).toMatchObject({
+        selectedNodeIds: ['6:141'],
+        selectionVerified: true,
+        detailsOmitted: true,
+        nodes: [{ id: '6:141', nameTruncated: true }],
+      });
+      expect(Buffer.byteLength(JSON.stringify(oversizedSelection), 'utf8')).toBeLessThan(1_500_000);
+      extensionSocket.off('message', replyToSelection);
+
+      const pageFixture = captureFixture('large', 'CANVAS');
+      const pageReady = new Promise<void>(resolve => {
+        const onPage = (data: unknown) => {
+          const message = JSON.parse(String(data)) as { type: string; session?: { nodes: number } };
+          if (
+            message.type !== 'capture-status' ||
+            message.session?.nodes !== pageFixture.expectedNodes
+          )
+            return;
+          extensionSocket?.off('message', onPage);
+          resolve();
+        };
+        extensionSocket?.on('message', onPage);
+      });
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          reset: true,
+          url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+        }),
+      );
+      extensionSocket.send(
+        JSON.stringify({ type: 'frame', tabId: 17, payload: pageFixture.schemaPayload }),
+      );
+      extensionSocket.send(
+        JSON.stringify({ type: 'frame', tabId: 17, payload: pageFixture.messagePayload }),
+      );
+      await pageReady;
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({
+        nodes: [],
+        selectedNodeId: null,
+        urlNodeId: '6:140',
+        selectionVerified: false,
+        selectionSource: 'url',
+      });
+      browserSelection = {
+        ...browserSelection,
+        count: 0,
+        nodeIds: [],
+        complete: true,
+        pageName: 'Root',
+      };
+      extensionSocket.on('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: browserSelection.url,
+          selectionCapture: true,
+        }),
+      );
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
+      const largeOverview = parseToolText(
+        await send('tools/call', { name: 'get_design_context', arguments: { tabId: 17 } }),
+      );
+      expect(largeOverview).toMatchObject({
+        scope: 'page-overview',
+        sectionPlan: { totalNodes: 2_001, sectionsTruncated: true, omittedSections: 1_800 },
+      });
+      expect((largeOverview.sectionPlan as { sections: unknown[] }).sections).toHaveLength(200);
+      expect(Buffer.byteLength(JSON.stringify(largeOverview), 'utf8')).toBeLessThan(1_500_000);
+      extensionSocket.off('message', replyToSelection);
     } finally {
       extensionSocket?.close();
       let code = child.exitCode;

@@ -54,6 +54,84 @@ afterEach(async () => {
 });
 
 describe('KiwiCaptureServer', () => {
+  it('correlates browser selection requests and refuses partial, stale and cross-tab replies', async () => {
+    const server = new KiwiCaptureServer({ port: 0 });
+    servers.push(server);
+    const port = await server.start();
+    const socket = new WebSocket(`ws://127.0.0.1:${port}`, {
+      origin: FIGWRIGHT_KIWI_EXTENSION_ORIGIN,
+    });
+    await new Promise<void>(resolve => socket.once('open', resolve));
+    const hello = {
+      type: 'hello',
+      tabId: 17,
+      url: 'https://www.figma.com/design/file/Test?node-id=0-1',
+      selectionCapture: true,
+    };
+    const ready = new Promise<void>(resolve => socket.once('message', () => resolve()));
+    socket.send(JSON.stringify(hello));
+    await ready;
+    const requests: Array<{ tabId: number; requestId: string }> = [];
+    socket.on('message', data => {
+      const message = JSON.parse(data.toString()) as {
+        type: string;
+        tabId: number;
+        requestId: string;
+      };
+      if (message.type === 'capture-selection-request') requests.push(message);
+    });
+    const respond = (index: number, patch: Record<string, unknown> = {}) => {
+      const request = requests[index]!;
+      socket.send(
+        JSON.stringify({
+          ...request,
+          type: 'capture-selection',
+          selection: {
+            url: hello.url,
+            count: 2,
+            nodeIds: ['4990:19595', '4990:19603'],
+            complete: true,
+          },
+          ...patch,
+        }),
+      );
+    };
+    const first = server.requestSelection(17);
+    await expect.poll(() => requests.length).toBe(1);
+    respond(0, { tabId: 18 }); // A different tab cannot answer this request.
+    respond(0);
+    await expect(first).resolves.toMatchObject({
+      count: 2,
+      nodeIds: ['4990:19595', '4990:19603'],
+      complete: true,
+    });
+
+    const partial = server.requestSelection(17);
+    await expect.poll(() => requests.length).toBe(2);
+    respond(1, {
+      selection: { url: hello.url, count: 2, nodeIds: ['4990:19595'], complete: true },
+    });
+    await expect(partial).resolves.toMatchObject({ count: 2, complete: false });
+
+    const stale = server.requestSelection(17).catch((error: unknown) => error);
+    await expect.poll(() => requests.length).toBe(3);
+    respond(2, {
+      selection: {
+        url: 'https://www.figma.com/design/other/Test',
+        count: 0,
+        nodeIds: [],
+        complete: true,
+      },
+    });
+    expect(await stale).toMatchObject({ message: expect.stringContaining('file changed') });
+
+    await expect(server.requestSelection(17, 10)).rejects.toThrow('Timed out');
+    const detached = server.requestSelection(17).catch((error: unknown) => error);
+    socket.send(JSON.stringify({ type: 'detach', tabId: 17 }));
+    expect(await detached).toMatchObject({ message: expect.stringContaining('detached') });
+    socket.close();
+  });
+
   it('parses the file and selected node from supported Figma URLs', () => {
     expect(
       parseFigmaLocation('https://www.figma.com/design/file-key/Name?node-id=1213-57067'),

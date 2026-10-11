@@ -3,7 +3,8 @@ import { z } from 'zod';
 
 export const FIGLENS_SERVER_INSTRUCTIONS = [
   'FigLens (fl) reads Figma from Chrome. Start with browser_status. If no decoded file is available, report the status and ask the user to open Figma and click FigLens > Подключить макет.',
-  'Use get_selection to confirm the target. With multiple tabs, call list_files and pass fileKey or tabId to every read; the shared hub has no active-file switch.',
+  'Use get_selection; trust current selection only when selectionVerified and complete are true. Read multiple selectedNodeIds explicitly. With multiple tabs, call list_files and pass fileKey or tabId to every read; the shared hub has no active-file switch.',
+  'When selectionCount is 0 and the selection is verified and complete, call get_design_context without nodeId for a bounded overview of the current page. Unknown or incomplete selection is not an empty selection. A page-overview response is a reading plan, not the full page contents.',
   'For implementation, use get_implementation_context with the actual absolute project rootDir. For design-only inspection, use get_design_context. Follow sectionPlan with bounded subtree reads and the same rootDir; deferred fields are available in those reads.',
   'Read applicable project instructions before editing. Reuse verified component/icon imports and tokens from the project; verify medium-confidence matches and treat matchedBy: [value] as candidates, not proven Figma bindings.',
   'Keep instance overrides, mixed text, dimensions, colors and opacity from the data. Report missing assets or metadata; do not invent them or substitute another Figma integration silently. Figma writes and authentication tokens are not needed.',

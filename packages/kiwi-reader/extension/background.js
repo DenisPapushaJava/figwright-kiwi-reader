@@ -1,4 +1,5 @@
 import { waitForWebSocketOpen } from './bridge-connection.js';
+import { readBrowserSelection } from './browser-selection.js';
 import { frameBudgetError } from './frame-budget.js';
 import {
   canForwardImageBody,
@@ -118,7 +119,15 @@ const removeAttachedTab = (tabId, publish = true) => {
 const sendHello = async (tabId, reset = false) => {
   const tab = await chrome.tabs.get(tabId);
   if (!tab.url?.startsWith('https://www.figma.com/')) return;
-  send({ type: 'hello', tabId, url: tab.url, title: tab.title, reset, captureImages });
+  send({
+    type: 'hello',
+    tabId,
+    url: tab.url,
+    title: tab.title,
+    reset,
+    captureImages,
+    selectionCapture: true,
+  });
   await publishState(tabId, { title: tab.title ?? null });
 };
 
@@ -176,6 +185,7 @@ const applyCaptureStatus = session => {
     title: session.title,
     fileKey: session.fileKey,
     selectedNodeId: session.selectedNodeId,
+    selectionSource: session.selectionSource ?? 'url',
     selectedNodeName: session.selectedNodeName ?? null,
     schemaReady: session.schemaReady,
     nodes: session.nodes,
@@ -302,6 +312,28 @@ const captureReference = async message => {
   }
 };
 
+const captureSelection = async ({ tabId, requestId }) => {
+  if (!attachedTabs.has(tabId) || typeof requestId !== 'string') return;
+  try {
+    const response = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+      expression: `(${readBrowserSelection.toString()})()`,
+      returnByValue: true,
+      timeout: 2_000,
+    });
+    if (response?.exceptionDetails || response?.result?.value === undefined) {
+      throw new Error('Chrome could not read the Figma selection');
+    }
+    send({ type: 'capture-selection', tabId, requestId, selection: response.result.value });
+  } catch (error) {
+    send({
+      type: 'capture-selection-error',
+      tabId,
+      requestId,
+      message: error instanceof Error ? error.message : String(error),
+    });
+  }
+};
+
 const connectBridge = () => {
   if (bridge?.readyState === WebSocket.OPEN) return Promise.resolve();
   if (connecting !== null) return connecting;
@@ -313,6 +345,7 @@ const connectBridge = () => {
       const message = JSON.parse(event.data);
       if (message.type === 'capture-status') applyCaptureStatus(message.session);
       if (message.type === 'capture-reference-request') void captureReference(message);
+      if (message.type === 'capture-selection-request') void captureSelection(message);
       if (message.type === 'capture-error' && attachedTabs.has(message.tabId)) {
         clearTabTimers(message.tabId);
         void publishState(message.tabId, {

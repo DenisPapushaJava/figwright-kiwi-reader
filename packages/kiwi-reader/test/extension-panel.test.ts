@@ -96,6 +96,8 @@ describe('FigLens panel', () => {
         state: { ...state, selectedNodeId: '6:141', selectedNodeName: null },
       });
       expect(elements.get('#node-name')?.textContent).toBe('6:141');
+      onState?.({ type: 'kiwi-state', state: { ...state, selectionSource: 'url' } });
+      expect(elements.get('#node-label')?.textContent).toBe('Узел из ссылки');
 
       onState?.({ type: 'kiwi-state', state: { ...state, attached: false } });
       expect(elements.get('#primary-action')?.textContent).toBe('Подключить макет');
