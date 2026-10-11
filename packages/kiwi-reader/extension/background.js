@@ -314,13 +314,18 @@ const captureReference = async message => {
   }
 };
 
-const captureSelection = async ({ tabId, requestId }) => {
+const captureSelection = async ({ tabId, requestId, revealNodeIds }) => {
   if (!attachedTabs.has(tabId) || typeof requestId !== 'string') return;
   let read = selectionReads.get(tabId);
   try {
     if (read === undefined) {
+      const hints = Array.isArray(revealNodeIds)
+        ? revealNodeIds
+            .slice(0, 512)
+            .filter(id => typeof id === 'string' && /^\d+:\d+$/.test(id) && id.length <= 64)
+        : [];
       read = chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
-        expression: `(${readBrowserSelection.toString()})()`,
+        expression: `(${readBrowserSelection.toString()})(${JSON.stringify(hints)})`,
         returnByValue: true,
         awaitPromise: true,
         timeout: 10_000,

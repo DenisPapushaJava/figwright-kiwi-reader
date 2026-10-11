@@ -1,6 +1,7 @@
 // This function is serialized into the attached tab. Keep it self-contained and DOM-only.
 /* oxlint-disable unicorn/consistent-function-scoping -- Helpers must travel with the serialized function. */
-export const readBrowserSelection = async () => {
+export const readBrowserSelection = async (revealNodeIds = []) => {
+  const hints = new Set(revealNodeIds.slice(0, 512));
   const maxIds = 10_000;
   const maxIdChars = 200_000;
   const deadline = Date.now() + 8_000;
@@ -41,23 +42,36 @@ export const readBrowserSelection = async () => {
   const ids = new Map();
   let idChars = 0;
   let limited = false;
-  const collect = roots => {
+  const collect = (roots, parent) => {
     for (const root of roots) {
       const id = rowId(root);
-      if (id === null || ids.has(id)) continue;
+      if (id === null) continue;
+      const index = Number(root.getAttribute('aria-rowindex')) || ids.size + 1;
+      const order = parent === undefined ? [index] : [...parent.order, index - parent.index];
+      if (ids.has(id)) {
+        ids.set(id, order);
+        continue;
+      }
       if (ids.size >= maxIds || idChars + id.length > maxIdChars) {
         limited = true;
         continue;
       }
       idChars += id.length;
-      ids.set(id, Number(root.getAttribute('aria-rowindex')) || ids.size + 1);
+      ids.set(id, order);
     }
   };
   const result = (complete, incompleteReason) => ({
     url: initial.url,
     pageName: initial.pageName,
     count: initial.count,
-    nodeIds: [...ids].toSorted((a, b) => a[1] - b[1]).map(([id]) => id),
+    nodeIds: [...ids]
+      .toSorted((a, b) => {
+        for (let i = 0; i < Math.min(a[1].length, b[1].length); i++) {
+          if (a[1][i] !== b[1][i]) return a[1][i] - b[1][i];
+        }
+        return a[1].length - b[1].length;
+      })
+      .map(([id]) => id),
     complete,
     ...(incompleteReason === undefined ? {} : { incompleteReason }),
   });
@@ -75,11 +89,7 @@ export const readBrowserSelection = async () => {
   const tree = document.querySelector('[data-testid="objects-panel"][role="treegrid"]');
   let scroller = tree;
   while (scroller !== null) {
-    if (
-      scroller.clientHeight > 0 &&
-      scroller.scrollHeight > scroller.clientHeight &&
-      /^(auto|scroll)$/.test(getComputedStyle(scroller).overflowY)
-    ) {
+    if (scroller.clientHeight > 0 && /^(auto|scroll)$/.test(getComputedStyle(scroller).overflowY)) {
       break;
     }
     scroller = scroller.parentElement;
@@ -120,22 +130,48 @@ export const readBrowserSelection = async () => {
     tree.isConnected;
   let complete = false;
   let incompleteReason = 'scan-timeout';
-  for (const event of inputEvents) document.addEventListener(event, onInput, true);
-  try {
-    let top = 0;
-    while (Date.now() < deadline) {
+  const findRow = id => [...tree.querySelectorAll('[role="row"]')].find(row => rowId(row) === id);
+  const waitFor = async (predicate, until) => {
+    do {
+      // oxlint-disable-next-line no-await-in-loop -- Poll the same DOM state within a shared deadline.
+      await settle();
+      if (!sameSelection(snapshot())) return false;
+      if (predicate()) return true;
+    } while (Date.now() < until);
+    return false;
+  };
+  const scan = async (until, parent) => {
+    const candidates = new Map();
+    let top = parent?.top ?? 0;
+    while (Date.now() < until) {
       if (!sameSelection(snapshot())) break;
       scroller.scrollTop = top;
       // Scroll offsets update before Figma renders virtual rows. Do not skip a viewport
       // (or declare the bottom exhausted) while its rows still belong to an earlier one.
-      do {
-        // oxlint-disable-next-line no-await-in-loop -- Wait for this viewport within the shared deadline.
-        await settle();
-        if (!sameSelection(snapshot())) break;
-      } while (Date.now() < deadline && !viewportRendered());
+      // oxlint-disable-next-line no-await-in-loop -- Scan consecutive virtual viewports.
+      const rendered = await waitFor(viewportRendered, until);
       const current = snapshot();
       if (!sameSelection(current)) break;
-      collect(current.roots);
+      const rows = [...tree.querySelectorAll('[role="row"]')];
+      const boundary =
+        parent === undefined
+          ? undefined
+          : rows.find(
+              row =>
+                Number(row.getAttribute('aria-rowindex')) > parent.index &&
+                Number(row.getAttribute('aria-level')) <= parent.level,
+            );
+      const end =
+        boundary === undefined ? Infinity : Number(boundary.getAttribute('aria-rowindex'));
+      collect(
+        parent === undefined
+          ? current.roots
+          : current.roots.filter(root => {
+              const index = Number(root.getAttribute('aria-rowindex'));
+              return index > parent.index && index < end;
+            }),
+        parent,
+      );
       if (limited) {
         incompleteReason = 'selection-limit';
         break;
@@ -148,11 +184,45 @@ export const readBrowserSelection = async () => {
         interrupted = true;
         break;
       }
-      if (!viewportRendered()) break;
+      if (!rendered) break;
+      for (const row of rows) {
+        if (
+          row.getAttribute('aria-expanded') !== 'false' ||
+          row.getAttribute('aria-selected') !== 'false'
+        )
+          continue;
+        const id = rowId(row);
+        const index = Number(row.getAttribute('aria-rowindex'));
+        const rawLevel = row.getAttribute('aria-level');
+        const level = Number(rawLevel);
+        if (
+          id === null ||
+          !Number.isInteger(index) ||
+          index < 1 ||
+          rawLevel === null ||
+          !Number.isInteger(level) ||
+          level < 0 ||
+          (parent !== undefined && (index <= parent.index || index >= end)) ||
+          candidates.has(id) ||
+          candidates.size >= 128
+        )
+          continue;
+        candidates.set(id, {
+          id,
+          index,
+          level,
+          top:
+            scroller.scrollTop +
+            row.getBoundingClientRect().top -
+            scroller.getBoundingClientRect().top,
+          order: parent === undefined ? [index] : [...parent.order, index - parent.index],
+        });
+      }
+      if (boundary !== undefined) return { candidates: [...candidates.values()], exhausted: true };
       const bottom = scroller.scrollHeight - scroller.clientHeight;
       if (top >= bottom) {
         incompleteReason = 'rows-unavailable';
-        break;
+        return { candidates: [...candidates.values()], exhausted: true };
       }
       const next = Math.min(bottom, top + Math.max(1, scroller.clientHeight * 0.75));
       if (next <= top) {
@@ -160,6 +230,106 @@ export const readBrowserSelection = async () => {
         break;
       }
       top = next;
+    }
+    return { candidates: [...candidates.values()], exhausted: false };
+  };
+  // Search shallow branches first. Keep only the current ancestor path expanded,
+  // reserving time to close it before Chrome's evaluation timeout.
+  const revealUntil = deadline - 2_000;
+  let disclosures = 0;
+  let restored = true;
+  const reveal = async (candidate, depth, hintedOnly = false) => {
+    if (
+      !restored ||
+      complete ||
+      disclosures >= 64 ||
+      Date.now() >= revealUntil ||
+      !sameSelection(snapshot())
+    )
+      return;
+    scroller.scrollTop = candidate.top;
+    if (
+      !(await waitFor(() => viewportRendered() && findRow(candidate.id) !== undefined, revealUntil))
+    )
+      return;
+    const row = findRow(candidate.id);
+    if (
+      row?.getAttribute('aria-expanded') !== 'false' ||
+      row.getAttribute('aria-selected') !== 'false'
+    )
+      return;
+    const caret = row.querySelector('button[data-testid="layers-panel-expand-caret"]');
+    if (caret === null) return;
+    disclosures++;
+    try {
+      caret.click();
+      if (
+        !(await waitFor(
+          () => findRow(candidate.id)?.getAttribute('aria-expanded') === 'true',
+          revealUntil,
+        ))
+      )
+        return;
+      const branch = await scan(revealUntil, candidate);
+      if (branch.exhausted && depth > 1) {
+        for (const child of branch.candidates) {
+          if (hintedOnly && !hints.has(child.id)) continue;
+          // oxlint-disable-next-line no-await-in-loop -- Restore a child before visiting its sibling.
+          await reveal(child, depth - 1, hintedOnly);
+          if (complete || !restored || Date.now() >= revealUntil || !sameSelection(snapshot()))
+            break;
+        }
+      }
+    } finally {
+      if (sameSelection(snapshot())) {
+        scroller.scrollTop = candidate.top;
+        const ready = await waitFor(
+          () => viewportRendered() && findRow(candidate.id) !== undefined,
+          deadline,
+        );
+        const expanded = ready ? findRow(candidate.id) : undefined;
+        if (expanded?.getAttribute('aria-expanded') === 'true') {
+          expanded.querySelector('button[data-testid="layers-panel-expand-caret"]')?.click();
+          if (
+            !(await waitFor(
+              () => findRow(candidate.id)?.getAttribute('aria-expanded') === 'false',
+              deadline,
+            ))
+          )
+            restored = false;
+        } else if (!ready) restored = false;
+      }
+    }
+  };
+  for (const event of inputEvents) document.addEventListener(event, onInput, true);
+  try {
+    const visible = await scan(deadline);
+    if (visible.exhausted && !complete && !limited) {
+      // A stale URL or previous selection can guide disclosure, never supply selected IDs.
+      for (const candidate of visible.candidates) {
+        if (!hints.has(candidate.id)) continue;
+        // oxlint-disable-next-line no-await-in-loop -- Follow only hinted ancestor paths first.
+        await reveal(candidate, 8, true);
+        if (complete || !restored || Date.now() >= revealUntil || !sameSelection(snapshot())) break;
+      }
+      for (let depth = 1; depth <= 8; depth++) {
+        for (const candidate of visible.candidates) {
+          // oxlint-disable-next-line no-await-in-loop -- Reveal one branch and restore it before the next.
+          await reveal(candidate, depth);
+          if (complete || !restored || Date.now() >= revealUntil || !sameSelection(snapshot()))
+            break;
+        }
+        if (
+          Date.now() >= revealUntil ||
+          complete ||
+          disclosures >= 64 ||
+          !restored ||
+          !sameSelection(snapshot()) ||
+          visible.candidates.length === 0
+        )
+          break;
+      }
+      if (!complete && Date.now() >= revealUntil) incompleteReason = 'scan-timeout';
     }
   } finally {
     // Do not undo a user's scroll or Figma's navigation to a new selection.
@@ -174,5 +344,5 @@ export const readBrowserSelection = async () => {
     ids.clear();
     return result(false, 'selection-changed');
   }
-  return result(complete, complete ? undefined : incompleteReason);
+  return result(complete && restored, complete && restored ? undefined : incompleteReason);
 };

@@ -1,4 +1,4 @@
-export const readBrowserSelection: () => Promise<{
+export const readBrowserSelection: (revealNodeIds?: string[]) => Promise<{
   url: string;
   pageName: string | null;
   count: number | null;

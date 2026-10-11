@@ -195,6 +195,7 @@ describe('Kiwi extension background messages', () => {
           type: 'capture-selection-request',
           tabId: 42,
           requestId: 'selection-1',
+          revealNodeIds: ['1:2', '3:4', 'not-a-node', 123],
         }),
       }),
     );
@@ -216,7 +217,11 @@ describe('Kiwi extension background messages', () => {
     expect(sendCommand).toHaveBeenCalledWith(
       { tabId: 42 },
       'Runtime.evaluate',
-      expect.objectContaining({ awaitPromise: true, timeout: 10_000 }),
+      expect.objectContaining({
+        awaitPromise: true,
+        timeout: 10_000,
+        expression: expect.stringContaining(')(["1:2","3:4"])'),
+      }),
     );
     let resolveSelection: ((response: unknown) => void) | undefined;
     deferredSelection = new Promise(resolve => {

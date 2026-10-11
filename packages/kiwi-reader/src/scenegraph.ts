@@ -634,6 +634,21 @@ export class SceneGraphStore {
     return this.nodes.get(normalizeNodeId(id))?.name?.trim() || null;
   }
 
+  /** Search hints only: the browser must still verify every selected ID against Figma's DOM. */
+  selectionPath(id: string): string[] {
+    const path: string[] = [];
+    const seen = new Set<string>();
+    let current: string | null = normalizeNodeId(id);
+    while (current !== null && !seen.has(current) && path.length < 32) {
+      const raw = this.nodes.get(current);
+      if (raw === undefined) break;
+      seen.add(current);
+      path.push(current);
+      current = guidId(raw.parentIndex?.guid);
+    }
+    return path;
+  }
+
   /** Match the DOM's active page only when its exact name identifies one captured canvas. */
   uniquePageId(name: string): string | null {
     let matched: string | null = null;

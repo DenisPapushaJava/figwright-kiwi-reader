@@ -261,6 +261,7 @@ export class KiwiCaptureSession {
   captureImages: boolean;
   selectionCapture: boolean;
   decodedFrames = 0;
+  selectionHintNodeIds: string[] = [];
   ignoredFrames = 0;
   consecutiveDecodeFailures = 0;
   decodeFailureReported = false;
@@ -356,6 +357,7 @@ export class KiwiCaptureSession {
   }
 
   reset(): void {
+    this.selectionHintNodeIds = [];
     this.graph.clear();
     this.blobs.clear();
     this.networkAssets.clear();
@@ -553,7 +555,22 @@ export class KiwiCaptureServer extends EventEmitter {
         reject,
         timer,
       });
-      socket.send(JSON.stringify({ type: 'capture-selection-request', tabId, requestId }));
+      const hints = new Set<string>();
+      for (const id of [session.selectedNodeId, ...session.selectionHintNodeIds.slice(0, 32)]) {
+        if (id === null) continue;
+        for (const ancestor of session.graph.selectionPath(id)) {
+          if (hints.size >= 512) break;
+          hints.add(ancestor);
+        }
+      }
+      socket.send(
+        JSON.stringify({
+          type: 'capture-selection-request',
+          tabId,
+          requestId,
+          revealNodeIds: [...hints],
+        }),
+      );
     });
   }
 
@@ -753,14 +770,17 @@ export class KiwiCaptureServer extends EventEmitter {
       return;
     }
     const nodeIds = [...new Set(selection.nodeIds)];
+    const complete =
+      selection.complete &&
+      selection.incompleteReason === undefined &&
+      selection.count !== null &&
+      selection.count === nodeIds.length;
+    const session = this.sessionMap.get(message.tabId);
+    if (complete && session !== undefined) session.selectionHintNodeIds = nodeIds.slice(0, 32);
     pending.resolve({
       ...selection,
       nodeIds,
-      complete:
-        selection.complete &&
-        selection.incompleteReason === undefined &&
-        selection.count !== null &&
-        selection.count === nodeIds.length,
+      complete,
     });
   }
 

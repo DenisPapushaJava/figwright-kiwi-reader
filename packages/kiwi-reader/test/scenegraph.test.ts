@@ -25,6 +25,29 @@ const visibilityBinding = (
       };
 
 describe('SceneGraphStore', () => {
+  it('bounds browser disclosure paths and stops at missing or cyclic ancestors', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: Array.from({ length: 40 }, (_, i) => ({
+        guid: { sessionID: 1, localID: i },
+        type: 'FRAME',
+        parentIndex: { guid: { sessionID: 1, localID: i + 1 } },
+      })),
+    });
+    expect(graph.selectionPath('1-0')).toEqual(Array.from({ length: 32 }, (_, i) => `1:${i}`));
+    expect(graph.selectionPath('1:39')).toEqual(['1:39']);
+    expect(graph.selectionPath('9:9')).toEqual([]);
+    graph.apply({
+      nodeChanges: [
+        {
+          guid: { sessionID: 1, localID: 39 },
+          parentIndex: { guid: { sessionID: 1, localID: 38 } },
+        },
+      ],
+    });
+    expect(graph.selectionPath('1:38')).toEqual(['1:38', '1:39']);
+  });
+
   it('identifies a page by its exact DOM name only when the captured canvas is unique', () => {
     const graph = new SceneGraphStore();
     graph.apply({
