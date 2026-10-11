@@ -157,6 +157,36 @@ const overridePath = (value: unknown): string[] => {
 const overrideSegment = (raw: KiwiNodeChange, fallbackId: string): string =>
   guidId(raw.overrideKey) ?? fallbackId;
 
+const componentAssignmentEntries = (value: unknown): unknown[] | null => {
+  if (Array.isArray(value)) return value;
+  const entries = record(value)?.entries;
+  return Array.isArray(entries) ? entries : null;
+};
+
+const mergeComponentAssignments = (base: unknown, patch: unknown): unknown => {
+  const previous = componentAssignmentEntries(base);
+  const next = componentAssignmentEntries(patch);
+  if (previous === null || next === null) return patch;
+  const entries = [...previous];
+  const positions = new Map<string, number>();
+  for (const [index, value] of entries.entries()) {
+    const entry = record(value);
+    const id = guidId(entry?.defID ?? entry?.defId);
+    if (id !== null) positions.set(id, index);
+  }
+  for (const value of next) {
+    const entry = record(value);
+    const id = guidId(entry?.defID ?? entry?.defId);
+    const index = id === null ? undefined : positions.get(id);
+    if (index !== undefined) entries[index] = value;
+    else {
+      if (id !== null) positions.set(id, entries.length);
+      entries.push(value);
+    }
+  }
+  return Array.isArray(patch) ? entries : { ...record(patch), entries };
+};
+
 const mergeRecords = (base: UnknownRecord, patch: UnknownRecord): UnknownRecord => {
   const output: UnknownRecord = { ...base };
   for (const [key, value] of Object.entries(patch)) {
@@ -180,6 +210,13 @@ const mergeRecords = (base: UnknownRecord, patch: UnknownRecord): UnknownRecord 
       key === 'styleIdForText'
     ) {
       output[key] = value;
+      continue;
+    }
+    // Instance overrides are sparse: changing an icon must not discard a nested input's
+    // Label=false or text assignment. Replace each supplied property atomically by definition
+    // ID, preserving the others. Wire snapshots still replace the whole field in apply().
+    if (key === 'componentPropAssignments') {
+      output[key] = mergeComponentAssignments(output[key], value);
       continue;
     }
     const current = record(output[key]);
