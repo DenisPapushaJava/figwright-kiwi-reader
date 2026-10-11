@@ -380,4 +380,161 @@ describe('Kiwi shared style resolution', () => {
     });
     expect(cache.stats).toMatchObject({ misses: 2, invalidations: 1 });
   });
+
+  const versionedStyles = [
+    { ...redStyle, version: '982:10' },
+    { ...redStyle, guid: guid(3159, 13346), version: '572:33', fillPaints: bluePaint },
+  ];
+
+  it.each([false, true])(
+    'resolves both versions of the same paint style in either order (%s)',
+    reverse => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [
+          ...(reverse ? versionedStyles.toReversed() : versionedStyles),
+          ...versionedStyles.map((style, index) => ({
+            ...styledButton,
+            guid: guid(91, index),
+            styleIdForFill: { assetRef: { key: redStyle.key, version: style.version } },
+          })),
+        ],
+      });
+      for (const [index, style] of versionedStyles.entries()) {
+        const result = graph.findWithStats(`91:${index}`);
+        expect(result.node?.raw.fillPaints).toEqual(style.fillPaints);
+        expect(result).toMatchObject({ resolvedSharedStyles: 1, unresolvedSharedStyles: 0 });
+      }
+    },
+  );
+
+  it.each([1, 2])(
+    'keeps the captured paint when the requested version is missing (%s definitions)',
+    count => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [
+          ...versionedStyles.slice(0, count),
+          {
+            ...styledButton,
+            styleIdForFill: { assetRef: { key: redStyle.key, version: 'missing' } },
+          },
+        ],
+      });
+      const result = graph.findWithStats('20:1');
+      expect(result.node?.raw.fillPaints).toEqual(styledButton.fillPaints);
+      expect(result).toMatchObject({
+        resolvedSharedStyles: 0,
+        unresolvedSharedStyles: 1,
+        styles: {},
+      });
+    },
+  );
+
+  it('does not guess an ambiguous unversioned style while keeping exact GUID references', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        ...versionedStyles,
+        { ...styledButton, styleIdForFill: { assetRef: { key: redStyle.key } } },
+        { ...styledButton, guid: guid(92, 1), styleIdForFill: { guid: redStyle.guid } },
+      ],
+    });
+    const ambiguous = graph.findWithStats('20:1');
+    expect(ambiguous.node?.raw.fillPaints).toEqual(styledButton.fillPaints);
+    expect(ambiguous).toMatchObject({ resolvedSharedStyles: 0, unresolvedSharedStyles: 1 });
+    const exact = graph.findWithStats('92:1');
+    expect(exact.node?.raw.fillPaints).toEqual(redStyle.fillPaints);
+    expect(exact).toMatchObject({ resolvedSharedStyles: 1, unresolvedSharedStyles: 0 });
+  });
+
+  it('invalidates the cache when the requested version arrives beside another version', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        versionedStyles[1],
+        { ...styledButton, styleIdForFill: { assetRef: { key: redStyle.key, version: '982:10' } } },
+      ],
+    });
+    const cache = new NormalizedNodeCache();
+    const missing = cache.read(graph, '20:1', 8, 2_000);
+    expect(missing.result).toMatchObject({ unresolvedSharedStyles: 1 });
+    graph.apply({ nodeChanges: [versionedStyles[0]] });
+    const resolved = cache.read(graph, '20:1', 8, 2_000);
+    expect(resolved).not.toBe(missing);
+    expect(resolved.result.node?.raw.fillPaints).toEqual(redStyle.fillPaints);
+    expect(resolved.result).toMatchObject({ resolvedSharedStyles: 1, unresolvedSharedStyles: 0 });
+  });
+
+  it.each([{ fillPaints: redStyle.fillPaints }, { fillPaints: [] }])(
+    'applies a shared FILL paint style to a stroke, including an empty paint array',
+    ({ fillPaints }) => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [
+          { ...versionedStyles[0], fillPaints, strokePaints: bluePaint },
+          versionedStyles[1],
+          {
+            guid: guid(93, 1),
+            type: 'RECTANGLE',
+            styleIdForStrokeFill: { assetRef: { key: redStyle.key, version: '982:10' } },
+            strokePaints: bluePaint,
+          },
+        ],
+      });
+      const result = graph.findWithStats('93:1');
+      expect(result.node?.raw.strokePaints).toEqual(fillPaints);
+      expect(result).toMatchObject({ resolvedSharedStyles: 1, unresolvedSharedStyles: 0 });
+      expect(normalizeCapturedNode(result.node!).styleIds).toEqual({ stroke: redStyle.key });
+    },
+  );
+
+  it('keeps separate style versions in mixed text runs and effect bindings', () => {
+    const graph = new SceneGraphStore();
+    const effects = versionedStyles.map(style => ({
+      ...style,
+      guid: guid(94, style.guid.localID),
+      key: 'versioned-effect',
+      styleType: 'EFFECT',
+      effects: [{ type: 'DROP_SHADOW', color: { ...style.fillPaints[0]!.color }, radius: 4 }],
+    }));
+    graph.apply({
+      nodeChanges: [
+        ...versionedStyles,
+        ...effects,
+        {
+          guid: guid(95, 1),
+          type: 'TEXT',
+          fontName: { family: 'Inter', style: 'Regular' },
+          fontSize: 14,
+          styleIdForEffect: { assetRef: { key: 'versioned-effect', version: '982:10' } },
+          textData: {
+            characters: 'AB',
+            characterStyleIDs: [1, 2],
+            styleOverrideTable: versionedStyles.map((style, index) => ({
+              styleID: index + 1,
+              styleIdForFill: { assetRef: { key: redStyle.key, version: style.version } },
+              fillPaints: [],
+            })),
+          },
+        },
+      ],
+    });
+    const result = graph.findWithStats('95:1');
+    const text = normalizeCapturedNode(result.node!);
+    expect(
+      text.segments?.map(segment => {
+        const paint = segment.fills?.[0];
+        return paint?.type === 'SOLID' ? paint.color : undefined;
+      }),
+    ).toEqual(
+      versionedStyles.map(style => ({
+        r: style.fillPaints[0]!.color.r,
+        g: style.fillPaints[0]!.color.g,
+        b: style.fillPaints[0]!.color.b,
+      })),
+    );
+    expect(result.node?.raw.effects).toEqual(effects[0]!.effects);
+    expect(result).toMatchObject({ resolvedSharedStyles: 3, unresolvedSharedStyles: 0 });
+  });
 });
