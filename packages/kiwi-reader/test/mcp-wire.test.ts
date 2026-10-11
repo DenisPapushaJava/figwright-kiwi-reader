@@ -17,7 +17,7 @@ import { encodeRgbaPng } from '../src/png-diff.js';
 const DIST_ENTRY = join(import.meta.dirname, '..', 'dist', 'mcp.mjs');
 const HUB_ENTRY = join(import.meta.dirname, '..', 'dist', 'hub.mjs');
 
-const captureFixture = (mode: 'small' | 'large' | 'unicode' = 'small') => {
+const captureFixture = (mode: 'small' | 'large' | 'unicode' = 'small', rootType = 'FRAME') => {
   const schema = parseSchema(`
     message Guid {
       int sessionID = 1;
@@ -104,7 +104,7 @@ const captureFixture = (mode: 'small' | 'large' | 'unicode' = 'small') => {
   const messageFrame = zstdCompressSync(
     codec.encodeMessage({
       nodeChanges: [
-        { guid: { sessionID: 6, localID: 140 }, name: 'Root', type: 'FRAME' },
+        { guid: { sessionID: 6, localID: 140 }, name: 'Root', type: rootType },
         ...masters,
         ...children,
       ],
@@ -362,6 +362,9 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(selection).toMatchObject({
         fileKey: 'file',
         selectedNodeId: '6:140',
+        selectionSource: 'url',
+        selectionVerified: false,
+        complete: false,
         nodes: [{ id: '6:140', name: 'Root', type: 'FRAME' }],
       });
 
@@ -384,6 +387,105 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           },
         ],
       });
+
+      // The URL can stay on the page while two independent elements are selected.
+      let browserSelection = {
+        url: 'https://www.figma.com/design/file/Test?node-id=0-1',
+        count: 2,
+        nodeIds: ['6:141', '6:142'],
+        complete: true,
+      };
+      const replyToSelection = (data: unknown) => {
+        const request = JSON.parse(String(data)) as {
+          type: string;
+          tabId: number;
+          requestId: string;
+        };
+        if (request.type !== 'capture-selection-request') return;
+        extensionSocket?.send(
+          JSON.stringify({
+            type: 'capture-selection',
+            tabId: request.tabId,
+            requestId: request.requestId,
+            selection: browserSelection,
+          }),
+        );
+      };
+      extensionSocket.on('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: browserSelection.url,
+          selectionCapture: true,
+          captureImages: true,
+        }),
+      );
+      // The next status confirms that the hello has been applied before making MCP requests.
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
+      const multiple = parseToolText(
+        await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+      );
+      expect(multiple).toMatchObject({
+        selectionCount: 2,
+        selectedNodeIds: ['6:141', '6:142'],
+        selectedNodeId: null,
+        selectionSource: 'browser-dom',
+        selectionVerified: true,
+        complete: true,
+        nodes: [
+          { id: '6:141', name: 'Child' },
+          { id: '6:142', name: 'Button instance' },
+        ],
+        missingNodeIds: [],
+      });
+      const ambiguous = await send('tools/call', {
+        name: 'get_design_context',
+        arguments: { tabId: 17 },
+      });
+      expect(ambiguous.result).toMatchObject({ isError: true });
+      expect(JSON.stringify(ambiguous.result)).toContain('2 elements are selected');
+      browserSelection = { ...browserSelection, count: 1, nodeIds: ['6:142'] };
+      const singleContext = parseToolText(
+        await send('tools/call', {
+          name: 'get_design_context',
+          arguments: { tabId: 17, depth: 0 },
+        }),
+      );
+      expect(singleContext).toMatchObject({ nodes: [{ id: '6:142', name: 'Button instance' }] });
+      browserSelection = { ...browserSelection, count: 0, nodeIds: [] };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({ nodes: [], selectionCount: 0, selectedNodeIds: [], complete: true });
+      browserSelection = { ...browserSelection, count: 2, nodeIds: ['6:141'], complete: false };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({
+        selectionCount: 2,
+        selectedNodeIds: ['6:141'],
+        selectionVerified: false,
+        complete: false,
+      });
+      browserSelection = { ...browserSelection, count: 1, nodeIds: ['123:456'], complete: true };
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({ nodes: [], selectedNodeIds: ['123:456'], missingNodeIds: ['123:456'] });
+      extensionSocket.off('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+          captureImages: true,
+        }),
+      );
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
 
       const context = parseToolText(
         await send('tools/call', {
@@ -790,6 +892,69 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       expect(statusAfterPreflight.sessions[0]?.normalizationCache.normalizations).toBe(
         normalizationsBefore,
       );
+      browserSelection = { ...browserSelection, count: 1, nodeIds: ['6:141'], complete: true };
+      extensionSocket.on('message', replyToSelection);
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          url: browserSelection.url,
+          selectionCapture: true,
+        }),
+      );
+      await new Promise<void>(resolve => extensionSocket?.once('message', () => resolve()));
+      const oversizedSelection = parseToolText(
+        await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+      );
+      expect(oversizedSelection).toMatchObject({
+        selectedNodeIds: ['6:141'],
+        selectionVerified: true,
+        detailsOmitted: true,
+        nodes: [{ id: '6:141', nameTruncated: true }],
+      });
+      expect(Buffer.byteLength(JSON.stringify(oversizedSelection), 'utf8')).toBeLessThan(1_500_000);
+      extensionSocket.off('message', replyToSelection);
+
+      const pageFixture = captureFixture('small', 'CANVAS');
+      const pageReady = new Promise<void>(resolve => {
+        const onPage = (data: unknown) => {
+          const message = JSON.parse(String(data)) as { type: string; session?: { nodes: number } };
+          if (
+            message.type !== 'capture-status' ||
+            message.session?.nodes !== pageFixture.expectedNodes
+          )
+            return;
+          extensionSocket?.off('message', onPage);
+          resolve();
+        };
+        extensionSocket?.on('message', onPage);
+      });
+      extensionSocket.send(
+        JSON.stringify({
+          type: 'hello',
+          tabId: 17,
+          reset: true,
+          url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+        }),
+      );
+      extensionSocket.send(
+        JSON.stringify({ type: 'frame', tabId: 17, payload: pageFixture.schemaPayload }),
+      );
+      extensionSocket.send(
+        JSON.stringify({ type: 'frame', tabId: 17, payload: pageFixture.messagePayload }),
+      );
+      await pageReady;
+      expect(
+        parseToolText(
+          await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+        ),
+      ).toMatchObject({
+        nodes: [],
+        selectedNodeId: null,
+        urlNodeId: '6:140',
+        selectionVerified: false,
+        selectionSource: 'url',
+      });
     } finally {
       extensionSocket?.close();
       let code = child.exitCode;

@@ -128,7 +128,7 @@ const parseNodeTarget = (raw: string | undefined): { nodeId: string | null; file
   return { nodeId: normalizeNodeId(raw.trim()) };
 };
 
-const pickNode = (
+const pickNode = async (
   capture: KiwiCaptureServer,
   routing: KiwiMcpRoutingState,
   raw: string | undefined,
@@ -141,11 +141,23 @@ const pickNode = (
       ? {}
       : { fileKey: target.fileKey ?? options.fileKey }),
   });
-  const selectedNodeId = target.nodeId ?? session.selectedNodeId;
+  let selectedNodeId = target.nodeId ?? session.selectedNodeId;
+  if (target.nodeId === null && session.selectionCapture) {
+    const selection = await capture.requestSelection(session.tabId);
+    if (!selection.complete) {
+      throw new Error(
+        'The browser selection is incomplete. Call get_selection and pass an explicit nodeId.',
+      );
+    }
+    if (selection.nodeIds.length > 1) {
+      throw new Error(
+        `${selection.count} elements are selected. Call get_selection, then read each explicit nodeId.`,
+      );
+    }
+    selectedNodeId = selection.nodeIds[0] ?? null;
+  }
   if (selectedNodeId === null) {
-    throw new Error(
-      'No node id was provided and the active Figma tab has no selected node in its URL.',
-    );
+    throw new Error('No node is selected. Select one element in Figma or pass an explicit nodeId.');
   }
   const cache = normalizationCache(session);
   const cached = cache.read(
@@ -206,7 +218,7 @@ const projectNode = (node: SerializedNode, detail: DetailLevel): Record<string, 
   };
 };
 
-const groundingRoots = (
+const groundingRoots = async (
   capture: KiwiCaptureServer,
   routing: KiwiMcpRoutingState,
   options: {
@@ -215,8 +227,8 @@ const groundingRoots = (
     tabId?: number;
     fileKey?: string;
   },
-): { roots: DesignContextNode[]; caveats: string[] } => {
-  const result = pickNode(capture, routing, options.nodeId, {
+): Promise<{ roots: DesignContextNode[]; caveats: string[] }> => {
+  const result = await pickNode(capture, routing, options.nodeId, {
     ...(options.depth === undefined ? {} : { depth: options.depth }),
     ...(options.tabId === undefined ? {} : { tabId: options.tabId }),
     ...(options.fileKey === undefined ? {} : { fileKey: options.fileKey }),
@@ -284,7 +296,7 @@ const designAssets = (root: CapturedNode, session: KiwiCaptureSession) => {
   };
 };
 
-const captureMetadata = (result: ReturnType<typeof pickNode>) => ({
+const captureMetadata = (result: Awaited<ReturnType<typeof pickNode>>) => ({
   provider: 'kiwi-browser',
   fileKey: result.session.fileKey,
   tabId: result.session.tabId,
@@ -297,13 +309,13 @@ const captureMetadata = (result: ReturnType<typeof pickNode>) => ({
   },
 });
 
-const sectionPlanRoot = (result: ReturnType<typeof pickNode>): CapturedNode =>
+const sectionPlanRoot = (result: Awaited<ReturnType<typeof pickNode>>): CapturedNode =>
   result.captured.children.length > 0
     ? result.captured
     : (result.session.graph.find(result.selectedNodeId, 1, MAX_SECTION_PLAN_SECTIONS + 1) ??
       result.captured);
 
-const sectionPlanForResult = (result: ReturnType<typeof pickNode>, reason: string) => {
+const sectionPlanForResult = (result: Awaited<ReturnType<typeof pickNode>>, reason: string) => {
   if (result.stats.nodeLimitReached || result.stats.depthLimitReached) {
     const outline = result.session.graph.sectionOutline(
       result.selectedNodeId,
@@ -346,7 +358,7 @@ const projectionBudgetReason = (
     : null;
 };
 
-const designContext = (result: ReturnType<typeof pickNode>, detail: DetailLevel) => {
+const designContext = (result: Awaited<ReturnType<typeof pickNode>>, detail: DetailLevel) => {
   const projected = projectNode(normalizedPickedNode(result), detail);
   const assets = designAssets(result.captured, result.session);
   const variables = result.stats.variables;
@@ -515,26 +527,79 @@ export const createKiwiMcpServer = (
     'get_selection',
     {
       description:
-        'Read the node selected in the active Figma browser tab URL, without descendants.',
+        'Read the actual Figma browser selection, including multiple elements, without descendants. ' +
+        'Check selectionVerified and complete; a legacy URL target is not proof of current selection.',
       inputSchema: z.object({
         tabId: z.number().int().optional(),
         fileKey: z.string().optional(),
       }),
       annotations: READ_ONLY,
     },
-    ({ tabId, fileKey }) => {
+    async ({ tabId, fileKey }) => {
       const session = sessionByTarget(capture, routing, {
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
-      if (session.selectedNodeId === null) return textResult({ nodes: [] });
       const cache = normalizationCache(session);
-      const cached = cache.read(session.graph, session.selectedNodeId, 0, 1);
-      const node = cache.normalize(cached);
+      if (session.selectionCapture) {
+        const selection = await capture.requestSelection(session.tabId);
+        const nodes: SerializedNode[] = [];
+        const missingNodeIds: string[] = [];
+        for (const id of selection.nodeIds) {
+          const node = cache.normalize(cache.read(session.graph, id, 0, 1));
+          if (node === null) missingNodeIds.push(id);
+          else nodes.push(node);
+        }
+        const output = {
+          nodes,
+          fileKey: session.fileKey,
+          tabId: session.tabId,
+          selectedNodeId:
+            selection.complete && selection.nodeIds.length === 1 ? selection.nodeIds[0] : null,
+          selectedNodeIds: selection.nodeIds,
+          selectionCount: selection.count,
+          selectionSource: 'browser-dom',
+          selectionVerified: selection.complete,
+          complete: selection.complete,
+          missingNodeIds,
+          ...(selection.complete
+            ? {}
+            : {
+                caveat:
+                  'Only the selection rows currently available in the Figma DOM were read. Missing rows are not evidence of no selection. Pass an explicit nodeId when needed.',
+              }),
+        };
+        const serialized = serializeJson(output);
+        if (serializedBytes(serialized) > MAX_RESPONSE_BYTES) {
+          return textResult({
+            ...output,
+            nodes: nodes.map(node => ({
+              id: node.id,
+              name: node.name.slice(0, MAX_SECTION_NAME_CHARS),
+              nameTruncated: node.name.length > MAX_SECTION_NAME_CHARS,
+              type: node.type,
+            })),
+            detailsOmitted: true,
+            note: 'Selection details exceeded the response budget. Read each explicit nodeId with get_node or get_design_context.',
+          });
+        }
+        return serializedTextResult(serialized);
+      }
+      const node =
+        session.selectedNodeId === null
+          ? null
+          : cache.normalize(cache.read(session.graph, session.selectedNodeId, 0, 1));
+      const urlTarget = node?.type === 'CANVAS' || node?.type === 'DOCUMENT' ? null : node;
       return textResult({
-        nodes: node === null ? [] : [node],
+        nodes: urlTarget === null ? [] : [urlTarget],
         fileKey: session.fileKey,
-        selectedNodeId: session.selectedNodeId,
+        selectedNodeId: urlTarget?.id ?? null,
+        urlNodeId: session.selectedNodeId,
+        selectionSource: 'url',
+        selectionVerified: false,
+        complete: false,
+        caveat:
+          'This extension only reports node-id from the URL, which can remain on the page or a previous target during multiple selection. Update FigLens to read the actual selected elements.',
       });
     },
   );
@@ -552,8 +617,8 @@ export const createKiwiMcpServer = (
       }),
       annotations: READ_ONLY,
     },
-    ({ nodeId, depth, tabId, fileKey }) => {
-      const result = pickNode(capture, routing, nodeId, {
+    async ({ nodeId, depth, tabId, fileKey }) => {
+      const result = await pickNode(capture, routing, nodeId, {
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
@@ -606,8 +671,8 @@ export const createKiwiMcpServer = (
       }),
       annotations: READ_ONLY,
     },
-    ({ nodeId, depth, detail, tabId, fileKey }) => {
-      const result = pickNode(capture, routing, nodeId, {
+    async ({ nodeId, depth, detail, tabId, fileKey }) => {
+      const result = await pickNode(capture, routing, nodeId, {
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
@@ -692,7 +757,7 @@ export const createKiwiMcpServer = (
       annotations: READ_ONLY,
     },
     async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
-      const grounded = groundingRoots(capture, routing, {
+      const grounded = await groundingRoots(capture, routing, {
         ...(nodeId === undefined ? {} : { nodeId }),
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
@@ -720,7 +785,7 @@ export const createKiwiMcpServer = (
       annotations: READ_ONLY,
     },
     async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
-      const grounded = groundingRoots(capture, routing, {
+      const grounded = await groundingRoots(capture, routing, {
         ...(nodeId === undefined ? {} : { nodeId }),
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
@@ -755,7 +820,7 @@ export const createKiwiMcpServer = (
       annotations: READ_ONLY,
     },
     async ({ nodeId, depth, rootDir, tabId, fileKey }) => {
-      const grounded = groundingRoots(capture, routing, {
+      const grounded = await groundingRoots(capture, routing, {
         ...(nodeId === undefined ? {} : { nodeId }),
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
@@ -783,7 +848,7 @@ export const createKiwiMcpServer = (
       annotations: READ_ONLY,
     },
     async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
-      const result = pickNode(capture, routing, nodeId, {
+      const result = await pickNode(capture, routing, nodeId, {
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
@@ -951,7 +1016,7 @@ export const createKiwiMcpServer = (
       annotations: LOCAL_WRITE,
     },
     async ({ nodeId, depth, outDir, tabId, fileKey }) => {
-      const result = pickNode(capture, routing, nodeId, {
+      const result = await pickNode(capture, routing, nodeId, {
         depth: depth ?? DEFAULT_MAX_DEPTH,
         maxNodes: DEFAULT_MAX_NODES,
         ...(tabId === undefined ? {} : { tabId }),

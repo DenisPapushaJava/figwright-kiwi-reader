@@ -53,11 +53,15 @@ pnpm test
 
 ## Инструменты
 
-- `browser_status`, `list_files`, `get_selection` — подключение, файлы и выбранный узел.
+- `browser_status`, `list_files`, `get_selection` — подключение, файлы и выбранные элементы.
 - `get_node`, `get_design_context` — данные узла или Figma URL.
 - `get_implementation_context` — дизайн, ресурсы и сопоставление с кодом по абсолютному `rootDir`.
 - `analyze_project`, `scan_components`, `component_map`, `icon_map`, `token_map` — анализ проекта.
 - `save_assets`, `capture_reference`, `compare_screenshots` — ресурсы и визуальная сверка.
+
+`get_selection` читает до 100 выбранных ID из интерфейса Figma. `selectionVerified` и `complete` показывают,
+получены ли все выбранные ID; скрытые строки слоёв могут быть недоступны. Несколько элементов
+читайте по отдельным `nodeId`. В старом расширении ID из URL не подтверждает текущее выделение.
 
 Начинайте с `browser_status`. Если подключено несколько вкладок, указывайте `fileKey` или `tabId`
 в каждом чтении. Для крупных узлов следуйте `sectionPlan`, сохраняя тот же `rootDir`.

@@ -138,15 +138,22 @@ describe('Kiwi extension background messages', () => {
       debugger: {
         attach: vi.fn<(target: unknown, version: string) => Promise<void>>(async () => undefined),
         detach: vi.fn<(target: unknown) => Promise<void>>(async () => undefined),
-        sendCommand: vi.fn<
-          (
-            target: unknown,
-            command: string,
-          ) => Promise<{ body: string; base64Encoded: boolean } | undefined>
-        >(async (_target: unknown, command: string) =>
-          command === 'Network.getResponseBody'
-            ? { body: 'aGVsbG8=', base64Encoded: true }
-            : undefined,
+        sendCommand: vi.fn<(target: unknown, command: string) => Promise<unknown>>(
+          async (_target: unknown, command: string) =>
+            command === 'Network.getResponseBody'
+              ? { body: 'aGVsbG8=', base64Encoded: true }
+              : command === 'Runtime.evaluate'
+                ? {
+                    result: {
+                      value: {
+                        url: 'https://www.figma.com/design/file/Test',
+                        count: 2,
+                        nodeIds: ['4990:19595', '4990:19603'],
+                        complete: true,
+                      },
+                    },
+                  }
+                : undefined,
         ),
         onEvent: event<NonNullable<typeof onDebuggerEvent>>(listener => {
           onDebuggerEvent = listener;
@@ -175,6 +182,33 @@ describe('Kiwi extension background messages', () => {
     await expect(invoke({ type: 'connect', tabId: 42 })).resolves.toMatchObject({ ok: true });
     const first = sockets[0];
     expect(first).toBeDefined();
+    expect(first?.sent).toContainEqual(
+      expect.objectContaining({ type: 'hello', selectionCapture: true }),
+    );
+    first?.dispatchEvent(
+      new MessageEvent('message', {
+        data: JSON.stringify({
+          type: 'capture-selection-request',
+          tabId: 42,
+          requestId: 'selection-1',
+        }),
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(first?.sent).toContainEqual(
+        expect.objectContaining({
+          type: 'capture-selection',
+          tabId: 42,
+          requestId: 'selection-1',
+          selection: {
+            url: 'https://www.figma.com/design/file/Test',
+            count: 2,
+            nodeIds: ['4990:19595', '4990:19603'],
+            complete: true,
+          },
+        }),
+      ),
+    );
     await expect(
       invoke({ type: 'set-capture-options', tabId: 42, captureImages: false }),
     ).resolves.toMatchObject({ ok: true });

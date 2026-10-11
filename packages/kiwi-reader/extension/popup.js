@@ -8,6 +8,7 @@ const elements = {
   fileCard: document.querySelector('#file-card'),
   fileTitle: document.querySelector('#file-title'),
   nodeName: document.querySelector('#node-name'),
+  nodeLabel: document.querySelector('#node-label'),
   captureSummary: document.querySelector('#capture-summary'),
   nodeCount: document.querySelector('#node-count'),
   captureOptions: document.querySelector('#capture-options'),
@@ -119,6 +120,10 @@ const render = state => {
   elements.fileTitle.textContent = state?.title ? cleanTitle(state.title) : 'Не выбран';
   elements.fileTitle.title = state?.title ?? '';
   const selectedNodeName = state?.selectedNodeName?.trim() || null;
+  setText(
+    elements.nodeLabel,
+    state?.selectionSource === 'url' ? 'Узел из ссылки' : 'Выбранный узел',
+  );
   elements.nodeName.textContent =
     selectedNodeName ?? state?.selectedNodeId ?? 'Выберите узел в Figma';
   elements.nodeName.title = selectedNodeName ?? state?.selectedNodeId ?? '';

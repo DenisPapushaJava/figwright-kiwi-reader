@@ -5,6 +5,7 @@ import type { IncomingMessage } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
 
 import { CapturedBlobStore, type CapturedBlobStats } from './blob-store.js';
+import { BrowserSelectionSchema, type BrowserSelection } from './browser-selection.js';
 import { CapturedNetworkAssetStore, type CapturedNetworkAssetStats } from './network-assets.js';
 import { decodeReferencePng, type BrowserReferenceCapture } from './reference-capture.js';
 import { normalizeNodeId, SceneGraphLimitError, SceneGraphStore } from './scenegraph.js';
@@ -20,6 +21,7 @@ interface ExtensionHello {
   title?: string;
   reset?: boolean;
   captureImages?: boolean;
+  selectionCapture?: boolean;
 }
 
 interface ExtensionFrame {
@@ -57,12 +59,17 @@ interface ExtensionReferenceError {
   message: string;
 }
 
+type ExtensionSelection =
+  | { type: 'capture-selection'; tabId: number; requestId: string; selection: BrowserSelection }
+  | { type: 'capture-selection-error'; tabId: number; requestId: string; message: string };
+
 type ExtensionMessage =
   | ExtensionHello
   | ExtensionFrame
   | ExtensionAsset
   | ExtensionReference
   | ExtensionReferenceError
+  | ExtensionSelection
   | ExtensionDetach
   | { type: 'ping' };
 
@@ -76,6 +83,8 @@ export interface CaptureSessionStatus {
   connected: boolean;
   fileKey: string;
   selectedNodeId: string | null;
+  selectionSource: 'url';
+  selectionCapture: boolean;
   url: string;
   title: string | null;
   schemaReady: boolean;
@@ -149,7 +158,28 @@ const parseMessage = (data: Buffer): ExtensionMessage | null => {
         ...(typeof message.captureImages === 'boolean'
           ? { captureImages: message.captureImages }
           : {}),
+        ...(message.selectionCapture === true ? { selectionCapture: true } : {}),
       };
+    }
+    if (Number.isInteger(message.tabId) && typeof message.requestId === 'string') {
+      if (message.type === 'capture-selection') {
+        const selection = BrowserSelectionSchema.safeParse(message.selection);
+        if (!selection.success) return null;
+        return {
+          type: 'capture-selection',
+          tabId: message.tabId as number,
+          requestId: message.requestId,
+          selection: selection.data,
+        };
+      }
+      if (message.type === 'capture-selection-error' && typeof message.message === 'string') {
+        return {
+          type: 'capture-selection-error',
+          tabId: message.tabId as number,
+          requestId: message.requestId,
+          message: message.message.slice(0, 2_000),
+        };
+      }
     }
     if (
       message.type === 'frame' &&
@@ -229,6 +259,7 @@ export class KiwiCaptureSession {
   url: string;
   title: string | null;
   captureImages: boolean;
+  selectionCapture: boolean;
   decodedFrames = 0;
   ignoredFrames = 0;
   consecutiveDecodeFailures = 0;
@@ -246,6 +277,7 @@ export class KiwiCaptureSession {
     this.url = hello.url;
     this.title = hello.title ?? null;
     this.captureImages = hello.captureImages === true;
+    this.selectionCapture = hello.selectionCapture === true;
   }
 
   get status(): CaptureSessionStatus {
@@ -254,6 +286,8 @@ export class KiwiCaptureSession {
       connected: this.connected,
       fileKey: this.fileKey,
       selectedNodeId: this.selectedNodeId,
+      selectionSource: 'url',
+      selectionCapture: this.selectionCapture,
       url: this.url,
       title: this.title,
       schemaReady: this.decoder.ready,
@@ -274,6 +308,7 @@ export class KiwiCaptureSession {
     this.url = hello.url;
     this.title = hello.title ?? null;
     this.captureImages = hello.captureImages === true;
+    this.selectionCapture = hello.selectionCapture === true;
     this.lastActivityAt = Date.now();
   }
 
@@ -352,6 +387,16 @@ export class KiwiCaptureServer extends EventEmitter {
     }
   >();
   private server: WebSocketServer | null = null;
+  private readonly selectionRequests = new Map<
+    string,
+    {
+      tabId: number;
+      fileKey: string;
+      resolve: (value: BrowserSelection) => void;
+      reject: (error: Error) => void;
+      timer: ReturnType<typeof setTimeout>;
+    }
+  >();
   private socket: WebSocket | null = null;
 
   constructor(
@@ -478,6 +523,40 @@ export class KiwiCaptureServer extends EventEmitter {
     });
   }
 
+  requestSelection(tabId: number, timeoutMs = 3_000): Promise<BrowserSelection> {
+    const socket = this.socket;
+    const session = this.sessionMap.get(tabId);
+    if (socket === null || socket.readyState !== socket.OPEN || session === undefined) {
+      return Promise.reject(
+        new Error('Browser extension is not connected to the requested Figma tab'),
+      );
+    }
+    if (!session.selectionCapture) {
+      return Promise.reject(
+        new Error('Update the FigLens extension to read the actual browser selection'),
+      );
+    }
+    const requestId = randomUUID();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.selectionRequests.delete(requestId);
+        reject(
+          new Error(
+            'Timed out reading the actual Figma selection; the URL is not a reliable selection',
+          ),
+        );
+      }, timeoutMs);
+      this.selectionRequests.set(requestId, {
+        tabId,
+        fileKey: session.fileKey,
+        resolve,
+        reject,
+        timer,
+      });
+      socket.send(JSON.stringify({ type: 'capture-selection-request', tabId, requestId }));
+    });
+  }
+
   private bind(socket: WebSocket): void {
     this.socket?.close(4000, 'Replaced by a newer browser connection');
     // A new connection must describe its own tabs. Keeping the previous graph here would let an
@@ -517,6 +596,11 @@ export class KiwiCaptureServer extends EventEmitter {
         return;
       }
 
+      if (message.type === 'capture-selection' || message.type === 'capture-selection-error') {
+        this.finishSelectionRequest(message);
+        return;
+      }
+
       const session = this.sessionMap.get(message.tabId);
       if (session === undefined) return;
       if (message.type === 'asset') {
@@ -553,6 +637,11 @@ export class KiwiCaptureServer extends EventEmitter {
   private clearSessions(error: Error): void {
     this.clearStatusTimers();
     this.rejectReferenceRequests(error);
+    for (const request of this.selectionRequests.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
+    this.selectionRequests.clear();
     this.sessionMap.clear();
   }
 
@@ -563,6 +652,12 @@ export class KiwiCaptureServer extends EventEmitter {
     this.sessionMap.delete(tabId);
     this.cancelSessionStatus(tabId);
     this.lastStatusAt.delete(tabId);
+    for (const [requestId, request] of this.selectionRequests) {
+      if (request.tabId !== tabId) continue;
+      clearTimeout(request.timer);
+      this.selectionRequests.delete(requestId);
+      request.reject(new Error(`Figma tab ${tabId} detached during selection capture`));
+    }
     for (const [requestId, request] of this.referenceRequests) {
       if (request.tabId !== tabId) continue;
       clearTimeout(request.timer);
@@ -637,6 +732,33 @@ export class KiwiCaptureServer extends EventEmitter {
     } catch (error) {
       pending.reject(error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  private finishSelectionRequest(message: ExtensionSelection): void {
+    const pending = this.selectionRequests.get(message.requestId);
+    if (pending === undefined || pending.tabId !== message.tabId) return;
+    clearTimeout(pending.timer);
+    this.selectionRequests.delete(message.requestId);
+    if (message.type === 'capture-selection-error') {
+      pending.reject(new Error(message.message));
+      return;
+    }
+    const selection = message.selection;
+    const location = parseFigmaLocation(selection.url);
+    if (
+      location?.fileKey !== pending.fileKey ||
+      this.sessionMap.get(message.tabId)?.fileKey !== pending.fileKey
+    ) {
+      pending.reject(new Error('The Figma file changed while reading the selection; retry'));
+      return;
+    }
+    const nodeIds = [...new Set(selection.nodeIds)];
+    pending.resolve({
+      ...selection,
+      nodeIds,
+      complete:
+        selection.complete && selection.count !== null && selection.count === nodeIds.length,
+    });
   }
 
   private rejectReferenceRequests(error: Error): void {
