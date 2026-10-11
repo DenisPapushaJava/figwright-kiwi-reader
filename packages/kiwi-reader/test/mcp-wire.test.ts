@@ -18,7 +18,7 @@ const DIST_ENTRY = join(import.meta.dirname, '..', 'dist', 'mcp.mjs');
 const HUB_ENTRY = join(import.meta.dirname, '..', 'dist', 'hub.mjs');
 
 const captureFixture = (
-  mode: 'small' | 'large' | 'unicode' = 'small',
+  mode: 'small' | 'large' | 'unicode' | 'deep' | 'wide' | 'instance' = 'small',
   rootType = 'FRAME',
   includePages = false,
 ) => {
@@ -54,57 +54,111 @@ const captureFixture = (
   schemaFrame.set(new TextEncoder().encode('fig-wire'));
   schemaFrame.set(schemaBytes, 12);
   const children =
-    mode === 'large'
-      ? Array.from({ length: 2_000 }, (_, index) => ({
-          guid: { sessionID: 6, localID: index + 141 },
-          name: `Section ${index} ${'x'.repeat(800)}`,
-          type: 'FRAME',
-          parentIndex: {
-            guid: { sessionID: 6, localID: 140 },
-            position: `${index}`.padStart(5, '0'),
-          },
-        }))
-      : mode === 'unicode'
+    mode === 'instance'
+      ? []
+      : mode === 'deep'
         ? [
-            {
-              guid: { sessionID: 6, localID: 141 },
-              name: `Unicode ${'Ж'.repeat(800_000)}`,
-              type: 'TEXT',
-              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
-            },
-            {
-              guid: { sessionID: 6, localID: 142 },
-              name: 'Sibling section',
+            ...Array.from({ length: 20 }, (_, index) => ({
+              guid: { sessionID: 6, localID: 141 + index },
+              name: `Level ${index + 1}`,
               type: 'FRAME',
+              parentIndex: { guid: { sessionID: 6, localID: 140 + index }, position: 'a' },
+            })),
+            {
+              guid: { sessionID: 6, localID: 500 },
+              name: 'Later sibling',
+              type: 'TEXT',
               parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
             },
           ]
+        : mode === 'wide'
+          ? [
+              {
+                guid: { sessionID: 6, localID: 141 },
+                name: 'Large first section',
+                type: 'FRAME',
+                parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
+              },
+              ...Array.from({ length: 2_000 }, (_, index) => ({
+                guid: { sessionID: 6, localID: 142 + index },
+                name: `Leaf ${index}`,
+                type: 'TEXT',
+                parentIndex: {
+                  guid: { sessionID: 6, localID: 141 },
+                  position: `${index}`.padStart(5, '0'),
+                },
+              })),
+              {
+                guid: { sessionID: 6, localID: 3_000 },
+                name: 'Later sibling',
+                type: 'TEXT',
+                parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+              },
+            ]
+          : mode === 'large'
+            ? Array.from({ length: 2_000 }, (_, index) => ({
+                guid: { sessionID: 6, localID: index + 141 },
+                name: `Section ${index} ${'x'.repeat(800)}`,
+                type: 'FRAME',
+                parentIndex: {
+                  guid: { sessionID: 6, localID: 140 },
+                  position: `${index}`.padStart(5, '0'),
+                },
+              }))
+            : mode === 'unicode'
+              ? [
+                  {
+                    guid: { sessionID: 6, localID: 141 },
+                    name: `Unicode ${'Ж'.repeat(800_000)}`,
+                    type: 'TEXT',
+                    parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
+                  },
+                  {
+                    guid: { sessionID: 6, localID: 142 },
+                    name: 'Sibling section',
+                    type: 'FRAME',
+                    parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+                  },
+                ]
+              : [
+                  {
+                    guid: { sessionID: 6, localID: 141 },
+                    name: 'Child',
+                    type: 'TEXT',
+                    parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
+                  },
+                  {
+                    guid: { sessionID: 6, localID: 142 },
+                    name: 'Button instance',
+                    type: 'INSTANCE',
+                    parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
+                    symbolData: { symbolID: { sessionID: 9, localID: 1 } },
+                  },
+                ];
+  const masters =
+    mode === 'instance'
+      ? [
+          { guid: { sessionID: 9, localID: 1 }, name: 'Large master', type: 'SYMBOL' },
+          ...Array.from({ length: 2_000 }, (_, index) => ({
+            guid: { sessionID: 9, localID: index + 2 },
+            name: `Master child ${index}`,
+            type: 'TEXT',
+            parentIndex: {
+              guid: { sessionID: 9, localID: 1 },
+              position: `${index}`.padStart(5, '0'),
+            },
+          })),
+        ]
+      : mode !== 'small'
+        ? []
         : [
             {
-              guid: { sessionID: 6, localID: 141 },
-              name: 'Child',
-              type: 'TEXT',
-              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'a' },
-            },
-            {
-              guid: { sessionID: 6, localID: 142 },
-              name: 'Button instance',
-              type: 'INSTANCE',
-              parentIndex: { guid: { sessionID: 6, localID: 140 }, position: 'b' },
-              symbolData: { symbolID: { sessionID: 9, localID: 1 } },
+              guid: { sessionID: 9, localID: 1 },
+              name: 'Button',
+              type: 'SYMBOL',
+              componentKey: 'button-key',
             },
           ];
-  const masters =
-    mode !== 'small'
-      ? []
-      : [
-          {
-            guid: { sessionID: 9, localID: 1 },
-            name: 'Button',
-            type: 'SYMBOL',
-            componentKey: 'button-key',
-          },
-        ];
   const messageFrame = zstdCompressSync(
     codec.encodeMessage({
       nodeChanges: [
@@ -120,6 +174,9 @@ const captureFixture = (
           guid: { sessionID: 6, localID: 140 },
           name: 'Root',
           type: rootType,
+          ...(mode === 'instance'
+            ? { symbolData: { symbolID: { sessionID: 9, localID: 1 } } }
+            : {}),
           ...(includePages
             ? { parentIndex: { guid: { sessionID: 0, localID: 1 }, position: 'a' } }
             : {}),
@@ -406,6 +463,35 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
           },
         ],
       });
+
+      // A deliberately shallow read still returns the requested properties and an actionable plan.
+      let shallowFullNode: unknown;
+      for (const detail of ['full', 'compact', 'minimal']) {
+        const shallow = parseToolText(
+          await send('tools/call', {
+            name: 'get_design_context',
+            arguments: { nodeId: '6:140', depth: 0, detail },
+          }),
+        );
+        expect(shallow).toMatchObject({
+          nodes: [{ id: '6:140', name: 'Root' }],
+          capture: { visited: 1, truncated: true, truncationReasons: ['depth-limit'] },
+          sectionPlan: {
+            sections: [{ nodeId: '6:141' }, { nodeId: '6:142' }],
+            sectionsTruncated: false,
+          },
+          assets: expect.any(Object),
+          note: expect.stringContaining('depth 32'),
+        });
+        if (detail === 'full') shallowFullNode = (shallow.nodes as unknown[])[0];
+      }
+      const {
+        locked: _locked,
+        parentId: _parentId,
+        visible: _visible,
+        ...projectedRoot
+      } = node.node as Record<string, unknown>;
+      expect(shallowFullNode).toEqual(projectedRoot);
 
       // The URL can stay on the page while two independent elements are selected.
       let browserSelection: {
@@ -872,6 +958,119 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         ignoreRegions: [{ x: 0, y: 0, width: 1, height: 1 }],
         boundingBox: null,
         diffPath,
+      });
+
+      const loadFixture = async (next: ReturnType<typeof captureFixture>) => {
+        const fixtureReady = new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(
+            () => reject(new Error('Timed out waiting for fixture')),
+            5_000,
+          );
+          const listener = (data: unknown) => {
+            const message = JSON.parse(String(data)) as {
+              type?: string;
+              session?: { nodes?: number };
+            };
+            if (message.type !== 'capture-status' || message.session?.nodes !== next.expectedNodes)
+              return;
+            clearTimeout(timeout);
+            extensionSocket?.off('message', listener);
+            resolve();
+          };
+          extensionSocket?.on('message', listener);
+        });
+        extensionSocket?.send(
+          JSON.stringify({
+            type: 'hello',
+            tabId: 17,
+            reset: true,
+            url: 'https://www.figma.com/design/file/Test?node-id=6-140',
+            captureImages: true,
+          }),
+        );
+        extensionSocket?.send(
+          JSON.stringify({ type: 'frame', tabId: 17, payload: next.schemaPayload }),
+        );
+        extensionSocket?.send(
+          JSON.stringify({ type: 'frame', tabId: 17, payload: next.messagePayload }),
+        );
+        await fixtureReady;
+      };
+
+      await loadFixture(captureFixture('deep', 'SECTION'));
+      for (const name of ['get_design_context', 'get_implementation_context']) {
+        const deep = parseToolText(
+          await send('tools/call', {
+            name,
+            arguments: {
+              nodeId: '6:140',
+              ...(name === 'get_implementation_context' ? { rootDir: assetDirectory } : {}),
+            },
+          }),
+        );
+        const deepDesign = (deep.design ?? deep) as Record<string, unknown>;
+        expect(deepDesign).toMatchObject({ capture: { visited: 22, truncated: false } });
+        expect(deep).not.toHaveProperty('sectionPlan');
+        expect(deepDesign.capture).not.toHaveProperty('truncationReasons');
+        const limited = parseToolText(
+          await send('tools/call', {
+            name,
+            arguments: {
+              nodeId: '6:140',
+              depth: 12,
+              ...(name === 'get_implementation_context' ? { rootDir: assetDirectory } : {}),
+            },
+          }),
+        );
+        expect(limited).toMatchObject({
+          capture: { visited: 14, truncated: true, truncationReasons: ['depth-limit'] },
+          sectionPlan: { sections: [{ nodeId: '6:141' }, { nodeId: '6:500' }] },
+        });
+      }
+      for (const detail of ['compact', 'minimal']) {
+        const outline = parseToolText(
+          await send('tools/call', {
+            name: 'get_design_context',
+            arguments: { nodeId: '6:140', detail },
+          }),
+        );
+        expect(outline).toMatchObject({ capture: { visited: 14, truncated: true } });
+      }
+
+      await loadFixture(captureFixture('wide', 'SECTION'));
+      const wideResponse = await send('tools/call', {
+        name: 'get_design_context',
+        arguments: { nodeId: '6:140' },
+      });
+      const wide = parseToolText(wideResponse);
+      expect(wide).toMatchObject({
+        nodes: [{ id: '6:140', children: [{ id: '6:141' }] }],
+        capture: { visited: 2_000, truncated: true, truncationReasons: ['node-limit'] },
+        sectionPlan: {
+          totalNodes: 2_003,
+          sections: [
+            { nodeId: '6:141', nodes: 2_001 },
+            { nodeId: '6:3000', nodes: 1 },
+          ],
+          sectionsTruncated: false,
+        },
+        assets: expect.any(Object),
+      });
+      expect(Buffer.byteLength(JSON.stringify(wide), 'utf8')).toBeLessThan(1_500_000);
+      const later = parseToolText(
+        await send('tools/call', { name: 'get_design_context', arguments: { nodeId: '6:3000' } }),
+      );
+      expect(later).toMatchObject({ nodes: [{ id: '6:3000' }], capture: { truncated: false } });
+      expect(later).not.toHaveProperty('sectionPlan');
+
+      await loadFixture(captureFixture('instance', 'INSTANCE'));
+      const instance = parseToolText(
+        await send('tools/call', { name: 'get_design_context', arguments: { nodeId: '6:140' } }),
+      );
+      expect(instance).toMatchObject({
+        nodes: [{ id: '6:140', type: 'INSTANCE' }],
+        capture: { visited: 2_000, truncated: true, truncationReasons: ['node-limit'] },
+        sectionPlan: { sections: [], sectionsUnavailable: true },
       });
 
       const largeFixture = captureFixture('large');
