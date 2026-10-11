@@ -389,6 +389,18 @@ const applyBooleanAssignment = (
       return { ...raw, visible };
     }
   }
+  // Current Kiwi captures bind component properties through parameterConsumptionMap. Only
+  // PROP_REF values belong to the component assignment scope; variable aliases do not.
+  const entries = record(raw.parameterConsumptionMap)?.entries;
+  if (!Array.isArray(entries)) return raw;
+  for (const value of entries) {
+    const entry = record(value);
+    if (entry?.variableField !== 'VISIBLE') continue;
+    const propertyRef = record(record(record(entry.variableData)?.value)?.propRefValue);
+    const definitionId = guidId(propertyRef?.defId ?? propertyRef?.defID);
+    const visible = definitionId === null ? undefined : assignments.get(definitionId);
+    if (visible !== undefined) return { ...raw, visible };
+  }
   return raw;
 };
 
