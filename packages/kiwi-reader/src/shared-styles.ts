@@ -16,7 +16,7 @@ export interface SharedStyleStats {
 }
 
 export interface SharedStyleIndex {
-  byReference: ReadonlyMap<string, KiwiNodeChange>;
+  byReference: ReadonlyMap<string, readonly KiwiNodeChange[]>;
 }
 
 const record = (value: unknown): UnknownRecord | null =>
@@ -69,10 +69,14 @@ const isSharedStyle = (node: KiwiNodeChange | undefined): node is KiwiNodeChange
   node !== undefined && nonEmptyString(node.styleType) !== undefined;
 
 export const buildSharedStyleIndex = (nodes: Iterable<KiwiNodeChange>): SharedStyleIndex => {
-  const byReference = new Map<string, KiwiNodeChange>();
+  const byReference = new Map<string, KiwiNodeChange[]>();
   for (const node of nodes) {
     if (!isSharedStyle(node)) continue;
-    for (const key of ownReferenceKeys(node)) byReference.set(key, node);
+    for (const key of ownReferenceKeys(node)) {
+      const definitions = byReference.get(key);
+      if (definitions === undefined) byReference.set(key, [node]);
+      else definitions.push(node);
+    }
   }
   return { byReference };
 };
@@ -83,9 +87,28 @@ export const hasSharedStyleDefinitionChange = (
 ): boolean => isSharedStyle(previous) || isSharedStyle(change);
 
 const lookup = (reference: unknown, index: SharedStyleIndex): KiwiNodeChange | null => {
+  const source = record(reference);
+  const version =
+    nonEmptyString(source?.version) ?? nonEmptyString(record(source?.assetRef)?.version);
   for (const key of referenceKeys(reference)) {
-    const found = index.byReference.get(key);
-    if (found !== undefined) return found;
+    const definitions = index.byReference.get(key);
+    if (definitions === undefined) continue;
+    // A local GUID identifies the exact definition even when several library versions coexist.
+    if (key.startsWith('guid:')) return definitions[0] ?? null;
+    if (version !== undefined) {
+      const exact = definitions.find(style => style.version === version);
+      if (exact !== undefined) return exact;
+    }
+    const only = definitions.length === 1 ? definitions[0] : undefined;
+    // Legacy captures may omit version metadata. Never substitute a known different version,
+    // or guess between multiple definitions; keep the node's captured paint in those cases.
+    if (
+      only !== undefined &&
+      (version === undefined || nonEmptyString(only.version) === undefined)
+    ) {
+      return only;
+    }
+    return null;
   }
   return null;
 };
@@ -128,7 +151,14 @@ export class SharedStyleResolver {
         used = true;
         this.stats.bindings++;
         const style = lookup(reference, this.index);
-        if (style === null || !Array.isArray(style[field.value])) {
+        // Figma paint styles store their paints in fillPaints even when bound to a stroke.
+        const value =
+          field.value === 'strokePaints' &&
+          style?.styleType === 'FILL' &&
+          Array.isArray(style.fillPaints)
+            ? style.fillPaints
+            : style?.[field.value];
+        if (style === null || !Array.isArray(value)) {
           this.stats.unresolved++;
           continue;
         }
@@ -136,7 +166,7 @@ export class SharedStyleResolver {
         this.styles[id] = { name: nonEmptyString(style.name) ?? id, type };
         this.stats.resolved++;
         if (output === source) output = { ...source };
-        output[field.value] = style[field.value];
+        output[field.value] = value;
       }
       return { value: output, used };
     };
