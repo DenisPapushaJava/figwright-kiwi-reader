@@ -1,4 +1,5 @@
 const elements = {
+  extensionVersion: document.querySelector('#extension-version'),
   statusDot: document.querySelector('#status-dot'),
   statusTitle: document.querySelector('#status-title'),
   statusDetail: document.querySelector('#status-detail'),
@@ -40,6 +41,10 @@ const setText = (element, value) => {
   if (element.textContent !== value) element.textContent = value;
 };
 
+const extensionVersion = chrome.runtime.getManifest().version;
+setText(elements.extensionVersion, `v${extensionVersion}`);
+elements.extensionVersion.title = `Версия расширения ${extensionVersion}`;
+
 const cleanTitle = title => title?.replace(/\s*[–-]\s*Figma\s*$/i, '').trim() || 'Макет Figma';
 const formatNumber = value => new Intl.NumberFormat('ru-RU').format(value ?? 0);
 
@@ -56,7 +61,7 @@ const diagnostics = state =>
       decodedFrames: state?.decodedFrames ?? 0,
       ignoredFrames: state?.ignoredFrames ?? 0,
       captureImages: state?.captureImages === true,
-      extensionVersion: chrome.runtime.getManifest().version,
+      extensionVersion,
     },
     null,
     2,
