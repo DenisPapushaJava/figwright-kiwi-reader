@@ -3,6 +3,27 @@ import { describe, expect, it } from 'vitest';
 import { normalizeCapturedNode } from '../src/normalize.js';
 import { SceneGraphLimitError, SceneGraphStore } from '../src/scenegraph.js';
 
+const visibilityBinding = (
+  format: 'legacy' | 'parameter-map',
+  defId: { sessionID: number; localID: number },
+) =>
+  format === 'legacy'
+    ? { componentPropRefs: [{ defID: defId, componentPropNodeField: 'VISIBLE' }] }
+    : {
+        parameterConsumptionMap: {
+          entries: [
+            {
+              variableField: 'VISIBLE',
+              variableData: {
+                value: { propRefValue: { defId } },
+                dataType: 'PROP_REF',
+                resolvedDataType: 'BOOLEAN',
+              },
+            },
+          ],
+        },
+      };
+
 describe('SceneGraphStore', () => {
   it('identifies a page by its exact DOM name only when the captured canvas is unique', () => {
     const graph = new SceneGraphStore();
@@ -651,103 +672,101 @@ describe('SceneGraphStore', () => {
     });
   });
 
-  it('applies boolean visibility properties and exposes verified variant grounding', () => {
-    const graph = new SceneGraphStore();
-    graph.apply({
-      nodeChanges: [
-        {
-          guid: { sessionID: 90, localID: 1 },
-          name: 'Button',
-          type: 'FRAME',
-          componentKey: 'button-set-key',
-          componentPropDefs: [
-            {
-              id: { sessionID: 900, localID: 1 },
-              name: 'Leading icon',
-              type: 'BOOL',
-              initialValue: { boolValue: true },
-            },
-          ],
-        },
-        {
-          guid: { sessionID: 90, localID: 2 },
-          parentIndex: { guid: { sessionID: 90, localID: 1 } },
-          name: 'Size=M, State=Enabled',
-          type: 'SYMBOL',
-          componentKey: 'button-variant-key',
-          variantPropSpecs: [{ value: 'Enabled' }, { value: 'M' }],
-          componentPropDefs: [
-            {
-              id: { sessionID: 900, localID: 2 },
-              parentPropDefId: { sessionID: 900, localID: 1 },
-            },
-          ],
-        },
-        {
-          guid: { sessionID: 90, localID: 3 },
-          parentIndex: { guid: { sessionID: 90, localID: 2 } },
-          name: 'Leading icon',
-          type: 'FRAME',
-          visible: true,
-          componentPropRefs: [
-            {
-              defID: { sessionID: 900, localID: 2 },
-              componentPropNodeField: 'VISIBLE',
-            },
-          ],
-        },
-        {
-          guid: { sessionID: 91, localID: 1 },
-          name: 'Button instance',
-          type: 'INSTANCE',
-          symbolData: { symbolID: { sessionID: 90, localID: 2 } },
-          componentPropAssignments: [
-            {
-              defID: { sessionID: 900, localID: 2 },
-              value: {},
-              varValue: { value: { boolValue: false } },
-            },
-          ],
-        },
-        {
-          guid: { sessionID: 91, localID: 2 },
-          name: 'Button with default icon',
-          type: 'INSTANCE',
-          symbolData: { symbolID: { sessionID: 90, localID: 2 } },
-        },
-      ],
-    });
+  it.each(['legacy', 'parameter-map'] as const)(
+    'applies %s boolean visibility properties and exposes verified variant grounding',
+    format => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [
+          {
+            guid: { sessionID: 90, localID: 1 },
+            name: 'Button',
+            type: 'FRAME',
+            componentKey: 'button-set-key',
+            componentPropDefs: [
+              {
+                id: { sessionID: 900, localID: 1 },
+                name: 'Leading icon',
+                type: 'BOOL',
+                initialValue: { boolValue: true },
+              },
+            ],
+          },
+          {
+            guid: { sessionID: 90, localID: 2 },
+            parentIndex: { guid: { sessionID: 90, localID: 1 } },
+            name: 'Size=M, State=Enabled',
+            type: 'SYMBOL',
+            componentKey: 'button-variant-key',
+            variantPropSpecs: [{ value: 'Enabled' }, { value: 'M' }],
+            componentPropDefs: [
+              {
+                id: { sessionID: 900, localID: 2 },
+                parentPropDefId: { sessionID: 900, localID: 1 },
+              },
+            ],
+          },
+          {
+            guid: { sessionID: 90, localID: 3 },
+            parentIndex: { guid: { sessionID: 90, localID: 2 } },
+            name: 'Leading icon',
+            type: 'FRAME',
+            visible: true,
+            ...visibilityBinding(format, { sessionID: 900, localID: 2 }),
+          },
+          {
+            guid: { sessionID: 91, localID: 1 },
+            name: 'Button instance',
+            type: 'INSTANCE',
+            symbolData: { symbolID: { sessionID: 90, localID: 2 } },
+            componentPropAssignments: [
+              {
+                defID: { sessionID: 900, localID: 2 },
+                value: {},
+                varValue: { value: { boolValue: false } },
+              },
+            ],
+          },
+          {
+            guid: { sessionID: 91, localID: 2 },
+            name: 'Button with default icon',
+            type: 'INSTANCE',
+            symbolData: { symbolID: { sessionID: 90, localID: 2 } },
+          },
+        ],
+      });
 
-    const result = graph.findWithStats('91:1');
-    expect(result.node).toMatchObject({
-      mainComponent: {
-        id: '90:2',
-        name: 'Size=M, State=Enabled',
-        key: 'button-variant-key',
-        componentSetId: '90:1',
-        componentSetName: 'Button',
-      },
-      componentProperties: {
-        Size: { type: 'VARIANT', value: 'M' },
-        State: { type: 'VARIANT', value: 'Enabled' },
-        'Leading icon#900:1': { type: 'BOOLEAN', value: false },
-      },
-      children: [{ name: 'Leading icon', visible: false, raw: { visible: false } }],
-    });
-    expect(result.node === null ? null : normalizeCapturedNode(result.node)).toMatchObject({
-      mainComponent: { componentSetId: '90:1', componentSetName: 'Button' },
-      componentProperties: {
-        Size: { type: 'VARIANT', value: 'M' },
-        State: { type: 'VARIANT', value: 'Enabled' },
-        'Leading icon#900:1': { type: 'BOOLEAN', value: false },
-      },
-      children: [{ visible: false }],
-    });
-    expect(graph.findWithStats('91:2').node).toMatchObject({
-      componentProperties: { 'Leading icon#900:1': { type: 'BOOLEAN', value: true } },
-      children: [{ name: 'Leading icon', visible: true }],
-    });
-  });
+      const result = graph.findWithStats('91:1');
+      expect(result.node).toMatchObject({
+        mainComponent: {
+          id: '90:2',
+          name: 'Size=M, State=Enabled',
+          key: 'button-variant-key',
+          componentSetId: '90:1',
+          componentSetName: 'Button',
+        },
+        componentProperties: {
+          Size: { type: 'VARIANT', value: 'M' },
+          State: { type: 'VARIANT', value: 'Enabled' },
+          'Leading icon#900:1': { type: 'BOOLEAN', value: false },
+        },
+        children: [{ name: 'Leading icon', visible: false, raw: { visible: false } }],
+      });
+      expect(result.node === null ? null : normalizeCapturedNode(result.node)).toMatchObject({
+        mainComponent: { componentSetId: '90:1', componentSetName: 'Button' },
+        componentProperties: {
+          Size: { type: 'VARIANT', value: 'M' },
+          State: { type: 'VARIANT', value: 'Enabled' },
+          'Leading icon#900:1': { type: 'BOOLEAN', value: false },
+        },
+        children: [{ visible: false }],
+      });
+      expect(graph.findWithStats('91:2').node).toMatchObject({
+        componentProperties: { 'Leading icon#900:1': { type: 'BOOLEAN', value: true } },
+        children: [{ name: 'Leading icon', visible: true }],
+      });
+    },
+  );
 
   it('reports a boolean property from its component default or an instance override', () => {
     const graph = new SceneGraphStore();
@@ -813,78 +832,203 @@ describe('SceneGraphStore', () => {
     expect(overriddenNode?.children[0]?.visible).toBe(false);
   });
 
-  it('keeps outer boolean assignments ahead of nested component defaults', () => {
+  it.each(['legacy', 'parameter-map'] as const)(
+    'keeps outer %s boolean assignments ahead of nested component defaults',
+    format => {
+      const graph = new SceneGraphStore();
+      graph.apply({
+        nodeChanges: [
+          {
+            guid: { sessionID: 92, localID: 1 },
+            name: 'Icon slot',
+            type: 'SYMBOL',
+            componentPropDefs: [
+              {
+                id: { sessionID: 920, localID: 1 },
+                name: 'Icon',
+                type: 'BOOL',
+                initialValue: { boolValue: false },
+              },
+            ],
+          },
+          {
+            guid: { sessionID: 92, localID: 2 },
+            parentIndex: { guid: { sessionID: 92, localID: 1 } },
+            name: 'Icon',
+            type: 'FRAME',
+            ...visibilityBinding(format, { sessionID: 920, localID: 1 }),
+          },
+          { guid: { sessionID: 93, localID: 1 }, name: 'Button', type: 'SYMBOL' },
+          {
+            guid: { sessionID: 93, localID: 2 },
+            parentIndex: { guid: { sessionID: 93, localID: 1 } },
+            name: 'Icon slot',
+            type: 'INSTANCE',
+            symbolData: { symbolID: { sessionID: 92, localID: 1 } },
+            componentPropAssignments: [
+              {
+                defID: { sessionID: 920, localID: 1 },
+                value: { boolValue: false },
+              },
+            ],
+          },
+          {
+            guid: { sessionID: 94, localID: 1 },
+            name: 'Placed button',
+            type: 'INSTANCE',
+            symbolData: { symbolID: { sessionID: 93, localID: 1 } },
+            componentPropAssignments: [
+              {
+                defID: { sessionID: 920, localID: 1 },
+                value: { boolValue: true },
+              },
+            ],
+          },
+        ],
+      });
+
+      expect(graph.findWithStats('94:1').node?.children[0]?.children[0]).toMatchObject({
+        name: 'Icon',
+        visible: true,
+      });
+      expect(graph.findWithStats('94:1').node?.children[0]?.componentProperties).toEqual({
+        'Icon#920:1': { type: 'BOOLEAN', value: true },
+      });
+      expect(graph.findWithStats('93:2').node?.children[0]).toMatchObject({
+        name: 'Icon',
+        visible: false,
+      });
+      expect(graph.findWithStats('93:2').node?.componentProperties).toEqual({
+        'Icon#920:1': { type: 'BOOLEAN', value: false },
+      });
+    },
+  );
+
+  it('hides disabled tabs and actions from a captured variant without changing the master', () => {
     const graph = new SceneGraphStore();
+    const tabNames = ['Tab 2', 'Tab 3', 'Tab 4', 'Tab 5', 'Tab 6', 'Tab 7', 'Action'];
     graph.apply({
       nodeChanges: [
         {
-          guid: { sessionID: 92, localID: 1 },
-          name: 'Icon slot',
-          type: 'SYMBOL',
-          componentPropDefs: [
-            {
-              id: { sessionID: 920, localID: 1 },
-              name: 'Icon',
-              type: 'BOOL',
-              initialValue: { boolValue: false },
-            },
-          ],
-        },
-        {
-          guid: { sessionID: 92, localID: 2 },
-          parentIndex: { guid: { sessionID: 92, localID: 1 } },
-          name: 'Icon',
+          guid: { sessionID: 2041, localID: 1 },
+          name: 'Many tabs',
           type: 'FRAME',
-          componentPropRefs: [
-            {
-              defID: { sessionID: 920, localID: 1 },
-              componentPropNodeField: 'VISIBLE',
-            },
-          ],
-        },
-        { guid: { sessionID: 93, localID: 1 }, name: 'Button', type: 'SYMBOL' },
-        {
-          guid: { sessionID: 93, localID: 2 },
-          parentIndex: { guid: { sessionID: 93, localID: 1 } },
-          name: 'Icon slot',
-          type: 'INSTANCE',
-          symbolData: { symbolID: { sessionID: 92, localID: 1 } },
-          componentPropAssignments: [
-            {
-              defID: { sessionID: 920, localID: 1 },
-              value: { boolValue: false },
-            },
-          ],
+          componentPropDefs: tabNames.map((name, i) => ({
+            id: { sessionID: 2041, localID: 21 + i },
+            name,
+            type: 'BOOL',
+            initialValue: { boolValue: true },
+          })),
         },
         {
-          guid: { sessionID: 94, localID: 1 },
-          name: 'Placed button',
+          guid: { sessionID: 2251, localID: 151094 },
+          parentIndex: { guid: { sessionID: 2041, localID: 1 } },
+          name: 'Property 1=Default',
+          type: 'SYMBOL',
+          componentPropDefs: tabNames.map((_, i) => ({
+            id: { sessionID: 2041, localID: 13 + i },
+            parentPropDefId: { sessionID: 2041, localID: 21 + i },
+          })),
+        },
+        {
+          guid: { sessionID: 2251, localID: 151095 },
+          parentIndex: { guid: { sessionID: 2251, localID: 151094 }, position: 'a' },
+          name: 'Always visible tab',
+          type: 'FRAME',
+          visible: true,
+        },
+        ...tabNames.map((name, i) => ({
+          guid: { sessionID: 2251, localID: 151096 + i },
+          parentIndex: {
+            guid: { sessionID: 2251, localID: 151094 },
+            position: String.fromCharCode(98 + i),
+          },
+          name,
+          type: 'FRAME',
+          visible: true,
+          ...visibilityBinding('parameter-map', { sessionID: 2041, localID: 13 + i }),
+        })),
+        {
+          guid: { sessionID: 2251, localID: 151115 },
+          name: 'Two tabs',
           type: 'INSTANCE',
-          symbolData: { symbolID: { sessionID: 93, localID: 1 } },
+          symbolData: { symbolID: { sessionID: 2251, localID: 151094 } },
+          componentPropAssignments: tabNames.slice(1).map((_, i) => ({
+            defID: { sessionID: 2041, localID: 14 + i },
+            varValue: { value: { boolValue: false }, dataType: 'BOOLEAN' },
+          })),
+        },
+      ],
+    });
+
+    const node = graph.find('2251:151115');
+    expect(node?.componentProperties?.['Tab 3#2041:22']).toEqual({ type: 'BOOLEAN', value: false });
+    expect(node?.children.filter(child => child.visible).map(child => child.name)).toEqual([
+      'Always visible tab',
+      'Tab 2',
+    ]);
+    expect(
+      node === null ? null : normalizeCapturedNode(node).children?.map(child => child.visible),
+    ).toEqual([true, true, false, false, false, false, false, false]);
+    expect(graph.find('2251:151094')?.children.every(child => child.visible)).toBe(true);
+
+    graph.apply({
+      nodeChanges: [{ guid: { sessionID: 2251, localID: 151115 }, componentPropAssignments: [] }],
+    });
+    expect(graph.find('2251:151115')?.children.every(child => child.visible)).toBe(true);
+  });
+
+  it('preserves unrelated bindings and unresolved visibility while honoring explicit overrides', () => {
+    const graph = new SceneGraphStore();
+    graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 96, localID: 1 }, name: 'Master', type: 'SYMBOL' },
+        ...[
+          {
+            variableField: 'OPACITY',
+            variableData: { value: { propRefValue: { defId: { sessionID: 960, localID: 1 } } } },
+          },
+          {
+            variableField: 'VISIBLE',
+            variableData: { value: { alias: { variableID: { sessionID: 960, localID: 1 } } } },
+          },
+          {
+            variableField: 'VISIBLE',
+            variableData: { value: { propRefValue: { defId: { sessionID: 960, localID: 2 } } } },
+          },
+          {
+            variableField: 'VISIBLE',
+            variableData: { value: { propRefValue: { defId: { sessionID: 960, localID: 1 } } } },
+          },
+        ].map((entry, i) => ({
+          guid: { sessionID: 96, localID: 2 + i },
+          parentIndex: { guid: { sessionID: 96, localID: 1 }, position: String(i) },
+          type: 'FRAME',
+          visible: true,
+          parameterConsumptionMap: { entries: [null, {}, entry] },
+        })),
+        {
+          guid: { sessionID: 97, localID: 1 },
+          type: 'INSTANCE',
+          symbolData: {
+            symbolID: { sessionID: 96, localID: 1 },
+            symbolOverrides: [
+              { guidPath: { guids: [{ sessionID: 96, localID: 5 }] }, visible: true },
+            ],
+          },
           componentPropAssignments: [
-            {
-              defID: { sessionID: 920, localID: 1 },
-              value: { boolValue: true },
-            },
+            { defID: { sessionID: 960, localID: 1 }, value: { boolValue: false } },
           ],
         },
       ],
     });
 
-    expect(graph.findWithStats('94:1').node?.children[0]?.children[0]).toMatchObject({
-      name: 'Icon',
-      visible: true,
-    });
-    expect(graph.findWithStats('94:1').node?.children[0]?.componentProperties).toEqual({
-      'Icon#920:1': { type: 'BOOLEAN', value: true },
-    });
-    expect(graph.findWithStats('93:2').node?.children[0]).toMatchObject({
-      name: 'Icon',
-      visible: false,
-    });
-    expect(graph.findWithStats('93:2').node?.componentProperties).toEqual({
-      'Icon#920:1': { type: 'BOOLEAN', value: false },
-    });
+    expect(graph.find('97:1')?.children.map(child => child.visible)).toEqual([
+      true,
+      true,
+      true,
+      true,
+    ]);
   });
 
   it('does not infer variant axes when the master name and specs disagree', () => {
