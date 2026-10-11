@@ -71,12 +71,24 @@ describe('KiwiCaptureServer', () => {
     const ready = new Promise<void>(resolve => socket.once('message', () => resolve()));
     socket.send(JSON.stringify(hello));
     await ready;
-    const requests: Array<{ tabId: number; requestId: string }> = [];
+    const session = server.sessions[0]!;
+    session.graph.apply({
+      nodeChanges: [
+        { guid: { sessionID: 0, localID: 1 }, type: 'CANVAS' },
+        { guid: { sessionID: 1, localID: 1 }, parentIndex: { guid: { sessionID: 0, localID: 1 } } },
+        ...[19595, 19603].map(localID => ({
+          guid: { sessionID: 4990, localID },
+          parentIndex: { guid: { sessionID: 1, localID: 1 } },
+        })),
+      ],
+    });
+    const requests: Array<{ tabId: number; requestId: string; revealNodeIds: string[] }> = [];
     socket.on('message', data => {
       const message = JSON.parse(data.toString()) as {
         type: string;
         tabId: number;
         requestId: string;
+        revealNodeIds: string[];
       };
       if (message.type === 'capture-selection-request') requests.push(message);
     });
@@ -98,6 +110,7 @@ describe('KiwiCaptureServer', () => {
     };
     const first = server.requestSelection(17);
     await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]!.revealNodeIds).toEqual(['0:1']);
     respond(0, { tabId: 18 }); // A different tab cannot answer this request.
     respond(0);
     await expect(first).resolves.toMatchObject({
@@ -108,14 +121,31 @@ describe('KiwiCaptureServer', () => {
 
     const partial = server.requestSelection(17);
     await expect.poll(() => requests.length).toBe(2);
+    expect(requests[1]!.revealNodeIds).toEqual(['0:1', '4990:19595', '1:1', '4990:19603']);
     respond(1, {
       selection: { url: hello.url, count: 2, nodeIds: ['4990:19595'], complete: true },
     });
     await expect(partial).resolves.toMatchObject({ count: 2, complete: false });
 
-    const stale = server.requestSelection(17).catch((error: unknown) => error);
+    const inconsistent = server.requestSelection(17);
     await expect.poll(() => requests.length).toBe(3);
     respond(2, {
+      selection: {
+        url: hello.url,
+        count: 0,
+        nodeIds: [],
+        complete: true,
+        incompleteReason: 'selection-changed',
+      },
+    });
+    await expect(inconsistent).resolves.toMatchObject({
+      complete: false,
+      incompleteReason: 'selection-changed',
+    });
+
+    const stale = server.requestSelection(17).catch((error: unknown) => error);
+    await expect.poll(() => requests.length).toBe(4);
+    respond(3, {
       selection: {
         url: 'https://www.figma.com/design/other/Test',
         count: 0,
@@ -126,6 +156,8 @@ describe('KiwiCaptureServer', () => {
     expect(await stale).toMatchObject({ message: expect.stringContaining('file changed') });
 
     await expect(server.requestSelection(17, 10)).rejects.toThrow('Timed out');
+    session.reset();
+    expect(session.selectionHintNodeIds).toEqual([]);
     const detached = server.requestSelection(17).catch((error: unknown) => error);
     socket.send(JSON.stringify({ type: 'detach', tabId: 17 }));
     expect(await detached).toMatchObject({ message: expect.stringContaining('detached') });

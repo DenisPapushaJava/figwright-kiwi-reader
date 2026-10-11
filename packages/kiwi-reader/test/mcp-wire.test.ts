@@ -414,6 +414,7 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         nodeIds: string[];
         complete: boolean;
         pageName: string | null;
+        incompleteReason?: 'scan-timeout' | undefined;
       } = {
         url: 'https://www.figma.com/design/file/Test?node-id=0-1',
         pageName: 'Current page',
@@ -465,6 +466,22 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         ],
         missingNodeIds: [],
       });
+      const pairSelection = browserSelection;
+      browserSelection = {
+        ...browserSelection,
+        count: 150,
+        nodeIds: Array.from({ length: 150 }, (_, i) => `6:${141 + i}`),
+      };
+      const largeSelection = parseToolText(
+        await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+      );
+      expect(largeSelection).toMatchObject({
+        selectionCount: 150,
+        selectionVerified: true,
+        complete: true,
+      });
+      expect(largeSelection.selectedNodeIds).toHaveLength(150);
+      browserSelection = pairSelection;
       const ambiguous = await send('tools/call', {
         name: 'get_design_context',
         arguments: { tabId: 17 },
@@ -561,7 +578,13 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       });
       expect(unknownSelection.result).toMatchObject({ isError: true });
       expect(JSON.stringify(unknownSelection.result)).toContain('selection is incomplete');
-      browserSelection = { ...browserSelection, count: 2, nodeIds: ['6:141'], complete: false };
+      browserSelection = {
+        ...browserSelection,
+        count: 2,
+        nodeIds: ['6:141'],
+        complete: false,
+        incompleteReason: 'scan-timeout',
+      };
       expect(
         parseToolText(
           await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
@@ -571,8 +594,15 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
         selectedNodeIds: ['6:141'],
         selectionVerified: false,
         complete: false,
+        selectionIncompleteReason: 'scan-timeout',
       });
-      browserSelection = { ...browserSelection, count: 1, nodeIds: ['123:456'], complete: true };
+      browserSelection = {
+        ...browserSelection,
+        count: 1,
+        nodeIds: ['123:456'],
+        complete: true,
+        incompleteReason: undefined,
+      };
       expect(
         parseToolText(
           await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
@@ -1083,6 +1113,25 @@ describe.skipIf(!existsSync(DIST_ENTRY))('Kiwi read-only MCP wire (built dist)',
       });
       expect((largeOverview.sectionPlan as { sections: unknown[] }).sections).toHaveLength(200);
       expect(Buffer.byteLength(JSON.stringify(largeOverview), 'utf8')).toBeLessThan(1_500_000);
+      browserSelection = {
+        ...browserSelection,
+        count: 2_000,
+        nodeIds: Array.from({ length: 2_000 }, (_, index) => `6:${index + 141}`),
+      };
+      const largeSelectionDetails = parseToolText(
+        await send('tools/call', { name: 'get_selection', arguments: { tabId: 17 } }),
+      );
+      expect(largeSelectionDetails).toMatchObject({
+        selectionCount: 2_000,
+        complete: true,
+        detailsOmitted: true,
+        missingNodeIds: [],
+      });
+      expect(largeSelectionDetails.selectedNodeIds).toHaveLength(2_000);
+      expect((largeSelectionDetails.nodes as unknown[]).length).toBeLessThan(2_000);
+      expect(Buffer.byteLength(JSON.stringify(largeSelectionDetails), 'utf8')).toBeLessThan(
+        1_500_000,
+      );
       extensionSocket.off('message', replyToSelection);
     } finally {
       extensionSocket?.close();

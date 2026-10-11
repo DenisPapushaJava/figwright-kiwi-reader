@@ -583,12 +583,36 @@ export const createKiwiMcpServer = (
           selection.complete && selection.count === 0 && selection.pageName != null
             ? session.graph.uniquePageId(selection.pageName)
             : null;
-        const nodes: SerializedNode[] = [];
+        const nodes: Array<
+          SerializedNode | { id: string; name: string; nameTruncated: boolean; type: string }
+        > = [];
         const missingNodeIds: string[] = [];
+        let detailsBytes = 0;
+        let detailsOmitted = false;
         for (const id of selection.nodeIds) {
+          if (!session.graph.has(id)) {
+            missingNodeIds.push(id);
+            continue;
+          }
+          if (detailsOmitted) continue;
           const node = cache.normalize(cache.read(session.graph, id, 0, 1));
           if (node === null) missingNodeIds.push(id);
-          else nodes.push(node);
+          else {
+            nodes.push(node);
+            detailsBytes += jsonBytes(node);
+            if (detailsBytes > MAX_RESPONSE_BYTES) {
+              detailsOmitted = true;
+              for (let i = 0; i < nodes.length; i++) {
+                const entry = nodes[i]!;
+                nodes[i] = {
+                  id: entry.id,
+                  name: entry.name.slice(0, MAX_SECTION_NAME_CHARS),
+                  nameTruncated: entry.name.length > MAX_SECTION_NAME_CHARS,
+                  type: entry.type,
+                };
+              }
+            }
+          }
         }
         const output = {
           nodes,
@@ -602,6 +626,15 @@ export const createKiwiMcpServer = (
           selectionVerified: selection.complete,
           complete: selection.complete,
           missingNodeIds,
+          ...(detailsOmitted
+            ? {
+                detailsOmitted: true,
+                note: 'Selection details exceeded the response budget. Only initial node outlines are included; read every selectedNodeId with get_node or get_design_context.',
+              }
+            : {}),
+          ...(selection.incompleteReason === undefined
+            ? {}
+            : { selectionIncompleteReason: selection.incompleteReason }),
           ...(currentPageId === null
             ? {}
             : {
@@ -612,22 +645,28 @@ export const createKiwiMcpServer = (
             ? {}
             : {
                 caveat:
-                  'Only the selection rows currently available in the Figma DOM were read. Missing rows are not evidence of no selection. Pass an explicit nodeId when needed.',
+                  selection.incompleteReason === 'selection-changed'
+                    ? 'The selection changed during the read. Retry get_selection after selecting the intended elements.'
+                    : 'The full browser selection could not be read. Missing IDs are not evidence of no selection. Check selectionIncompleteReason, retry or pass an explicit nodeId.',
               }),
         };
         const serialized = serializeJson(output);
         if (serializedBytes(serialized) > MAX_RESPONSE_BYTES) {
-          return textResult({
+          const compact = {
             ...output,
             nodes: nodes.map(node => ({
               id: node.id,
               name: node.name.slice(0, MAX_SECTION_NAME_CHARS),
-              nameTruncated: node.name.length > MAX_SECTION_NAME_CHARS,
+              nameTruncated:
+                ('nameTruncated' in node && node.nameTruncated) ||
+                node.name.length > MAX_SECTION_NAME_CHARS,
               type: node.type,
             })),
             detailsOmitted: true,
             note: 'Selection details exceeded the response budget. Read each explicit nodeId with get_node or get_design_context.',
-          });
+          };
+          if (jsonBytes(compact) > MAX_RESPONSE_BYTES) compact.nodes = [];
+          return textResult(compact);
         }
         return serializedTextResult(serialized);
       }
