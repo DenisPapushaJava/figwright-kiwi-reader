@@ -31,6 +31,7 @@ import { mapProjectTokens } from './token-grounding.js';
 
 const DEFAULT_MAX_NODES = 2_000;
 const DEFAULT_MAX_DEPTH = 12;
+const MAX_READ_DEPTH = 32;
 const MAX_RESPONSE_BYTES = 1_500_000;
 const MAX_SECTION_PLAN_SECTIONS = 200;
 const MAX_SECTION_NAME_CHARS = 500;
@@ -328,6 +329,14 @@ const captureMetadata = (result: Awaited<ReturnType<typeof pickNode>>) => ({
   tabId: result.session.tabId,
   visited: result.stats.visited,
   truncated: result.stats.nodeLimitReached || result.stats.depthLimitReached,
+  ...(result.stats.nodeLimitReached || result.stats.depthLimitReached
+    ? {
+        truncationReasons: [
+          ...(result.stats.nodeLimitReached ? ['node-limit'] : []),
+          ...(result.stats.depthLimitReached ? ['depth-limit'] : []),
+        ],
+      }
+    : {}),
   instanceResolution: {
     resolved: result.stats.resolvedInstances,
     unresolved: result.stats.unresolvedInstances,
@@ -347,7 +356,7 @@ const sectionPlanForResult = (result: Awaited<ReturnType<typeof pickNode>>, reas
       result.selectedNodeId,
       MAX_SECTION_PLAN_SECTIONS,
     );
-    if (outline !== null && outline.totalSections > 0) {
+    if (outline !== null) {
       const sections = outline.sections.map(section => ({
         nodeId: section.id,
         ...boundedName(section.name),
@@ -365,8 +374,12 @@ const sectionPlanForResult = (result: Awaited<ReturnType<typeof pickNode>>, reas
           sections,
           sectionsTruncated: outline.totalSections > sections.length,
           omittedSections: Math.max(0, outline.totalSections - sections.length),
+          ...(outline.totalSections === 0 ? { sectionsUnavailable: true } : {}),
         },
-        note: 'Request each section nodeId with get_design_context at detail full.',
+        note:
+          outline.totalSections === 0
+            ? 'This truncated node has no independently addressable child sections in the captured graph. Expanded instance child IDs cannot be read separately; do not treat this response as complete.'
+            : 'Request each section nodeId with get_design_context at detail full and depth 32; follow any further sectionPlan until capture.truncated is false.',
       };
     }
   }
@@ -401,10 +414,20 @@ const designContext = (result: Awaited<ReturnType<typeof pickNode>>, detail: Det
   const variableCount = Object.keys(variables).length;
   const styles = result.stats.styles;
   const styleCount = Object.keys(styles).length;
+  const continuation =
+    result.stats.nodeLimitReached || result.stats.depthLimitReached
+      ? sectionPlanForResult(
+          result,
+          `captured subtree truncated after ${result.stats.visited} nodes`,
+        )
+      : null;
   return {
     schemaVersion: DESIGN_CONTEXT_SCHEMA_VERSION,
     nodes: [projected],
     capture: captureMetadata(result),
+    ...(continuation === null
+      ? {}
+      : { sectionPlan: continuation.sectionPlan, note: continuation.note }),
     capabilities: {
       structuredProperties: 'captured-when-present',
       componentInstances:
@@ -708,10 +731,11 @@ export const createKiwiMcpServer = (
       description:
         'Return bounded browser-captured design context for a node id, pasted Figma URL, or the current selection. ' +
         'With a verified empty selection, return an overview of the current page. ' +
-        'Use detail full for implementation, compact for structure, and minimal for an outline.',
+        'Use detail full for implementation, compact for structure, and minimal for an outline. ' +
+        'Full reads default to depth 32; explicit depth is respected. Follow sectionPlan when capture.truncated is true.',
       inputSchema: z.object({
         nodeId: z.string().optional(),
-        depth: z.number().int().min(0).max(32).optional(),
+        depth: z.number().int().min(0).max(MAX_READ_DEPTH).optional(),
         detail: z.enum(['minimal', 'compact', 'full']).optional(),
         tabId: z.number().int().optional(),
         fileKey: z.string().optional(),
@@ -719,14 +743,18 @@ export const createKiwiMcpServer = (
       annotations: READ_ONLY,
     },
     async ({ nodeId, depth, detail, tabId, fileKey }) => {
+      const resolvedDetail = detail ?? 'full';
       const result = await pickNode(capture, routing, nodeId, {
         allowPageOverview: true,
-        ...(depth === undefined ? {} : { depth }),
+        ...(depth === undefined
+          ? resolvedDetail === 'full'
+            ? { depth: MAX_READ_DEPTH }
+            : {}
+          : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
       if (result.pageOverview) return textResult(pageOverviewForResult(result));
-      const resolvedDetail = detail ?? 'full';
       const preflightReason = projectionBudgetReason(result.captured, resolvedDetail, 'design');
       if (preflightReason !== null) {
         return textResult(sectionPlanForResult(result, preflightReason));
@@ -900,7 +928,7 @@ export const createKiwiMcpServer = (
     async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
       const result = await pickNode(capture, routing, nodeId, {
         allowPageOverview: true,
-        ...(depth === undefined ? {} : { depth }),
+        depth: depth ?? MAX_READ_DEPTH,
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
