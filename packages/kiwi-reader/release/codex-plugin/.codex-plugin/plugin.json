@@ -1,6 +1,6 @@
 {
   "name": "fl",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Read the current Figma browser selection through the local FigLens bridge.",
   "author": {
     "name": "DenisPapusha"
