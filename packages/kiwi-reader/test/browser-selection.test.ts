@@ -2,10 +2,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { readBrowserSelection } from '../extension/browser-selection.js';
 
-const mockDom = (label: string, roots: string[][]) => {
+const mockDom = (label: string, roots: string[][], pageName: string | null = null) => {
   vi.stubGlobal('location', { href: 'https://www.figma.com/design/file/Test?node-id=0-1' });
   vi.stubGlobal('document', {
-    querySelector: () => ({ getAttribute: () => label }),
+    querySelector: (selector: string) => {
+      if (selector.includes('[role="application"]')) return { getAttribute: () => label };
+      if (selector.includes('PagesRowWrapper'))
+        return pageName === null ? null : { textContent: pageName };
+      if (selector === '[role="row"][aria-selected="true"]')
+        return roots[0] === undefined ? null : {};
+      throw new Error(`Unexpected selector: ${selector}`);
+    },
     querySelectorAll: (selector: string) => {
       // Real Figma also marks descendants selected. Only selected roots identify the selection.
       expect(selector).toContain('[data-fpl-selected-root="true"]');
@@ -23,10 +30,26 @@ describe('Figma DOM selection', () => {
     mockDom('Figma Design, 2 items selected', [['4990:19595'], ['4990:19603']]);
     expect(readBrowserSelection()).toEqual({
       url: 'https://www.figma.com/design/file/Test?node-id=0-1',
+      pageName: null,
       count: 2,
       nodeIds: ['4990:19595', '4990:19603'],
       complete: true,
     });
+  });
+
+  it('recognizes the real empty-selection label only with an active page and no selected rows', () => {
+    mockDom('Figma Design', [], 'Current page');
+    expect(readBrowserSelection()).toMatchObject({
+      count: 0,
+      complete: true,
+      pageName: 'Current page',
+    });
+    mockDom('Figma Design', [['1:2']], 'Current page');
+    expect(readBrowserSelection()).toMatchObject({ count: null, complete: false });
+    mockDom('Figma Design, selection unavailable', [], 'Current page');
+    expect(readBrowserSelection()).toMatchObject({ count: null, complete: false });
+    mockDom('Figma Design', [], 'x'.repeat(2_001));
+    expect(readBrowserSelection()).toMatchObject({ count: null, complete: false, pageName: null });
   });
 
   it.each([

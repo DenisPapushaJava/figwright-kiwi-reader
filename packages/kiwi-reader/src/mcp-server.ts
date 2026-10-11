@@ -132,7 +132,13 @@ const pickNode = async (
   capture: KiwiCaptureServer,
   routing: KiwiMcpRoutingState,
   raw: string | undefined,
-  options: { depth?: number; maxNodes?: number; fileKey?: string; tabId?: number } = {},
+  options: {
+    depth?: number;
+    maxNodes?: number;
+    fileKey?: string;
+    tabId?: number;
+    allowPageOverview?: boolean;
+  } = {},
 ) => {
   const target = parseNodeTarget(raw);
   const session = sessionByTarget(capture, routing, {
@@ -142,6 +148,7 @@ const pickNode = async (
       : { fileKey: target.fileKey ?? options.fileKey }),
   });
   let selectedNodeId = target.nodeId ?? session.selectedNodeId;
+  let pageOverview = false;
   if (target.nodeId === null && session.selectionCapture) {
     const selection = await capture.requestSelection(session.tabId);
     if (!selection.complete) {
@@ -155,6 +162,17 @@ const pickNode = async (
       );
     }
     selectedNodeId = selection.nodeIds[0] ?? null;
+    if (selection.count === 0 && options.allowPageOverview === true) {
+      selectedNodeId =
+        selection.pageName == null ? null : session.graph.uniquePageId(selection.pageName);
+      if (selectedNodeId === null) {
+        throw new Error(
+          'No element is selected, but the current page could not be identified uniquely in the captured graph. ' +
+            'Select an element or pass an explicit nodeId.',
+        );
+      }
+      pageOverview = true;
+    }
   }
   if (selectedNodeId === null) {
     throw new Error('No node is selected. Select one element in Figma or pass an explicit nodeId.');
@@ -163,8 +181,8 @@ const pickNode = async (
   const cached = cache.read(
     session.graph,
     selectedNodeId,
-    options.depth ?? DEFAULT_MAX_DEPTH,
-    options.maxNodes ?? DEFAULT_MAX_NODES,
+    pageOverview ? 0 : (options.depth ?? DEFAULT_MAX_DEPTH),
+    pageOverview ? 1 : (options.maxNodes ?? DEFAULT_MAX_NODES),
   );
   const result = cached.result;
   if (result.node === null) {
@@ -173,7 +191,15 @@ const pickNode = async (
         'Reload the Figma tab with the reader enabled if it was selected after capture.',
     );
   }
-  return { session, selectedNodeId, captured: result.node, stats: result, cache, cached };
+  return {
+    session,
+    selectedNodeId,
+    captured: result.node,
+    stats: result,
+    cache,
+    cached,
+    pageOverview,
+  };
 };
 
 const normalizedPickedNode = (result: {
@@ -346,6 +372,16 @@ const sectionPlanForResult = (result: Awaited<ReturnType<typeof pickNode>>, reas
   }
   return sectionPlan(sectionPlanRoot(result), reason);
 };
+
+const pageOverviewForResult = (result: Awaited<ReturnType<typeof pickNode>>) => ({
+  ...sectionPlanForResult(result, 'No elements are selected; overview of the current page'),
+  scope: 'page-overview',
+  fallbackReason: 'no-selection',
+  selectionCount: 0,
+  selectionVerified: true,
+  capture: captureMetadata(result),
+  note: 'This is a bounded overview, not the full page contents. Request each section nodeId with get_design_context.',
+});
 
 const projectionBudgetReason = (
   root: CapturedNode,
@@ -543,6 +579,10 @@ export const createKiwiMcpServer = (
       const cache = normalizationCache(session);
       if (session.selectionCapture) {
         const selection = await capture.requestSelection(session.tabId);
+        const currentPageId =
+          selection.complete && selection.count === 0 && selection.pageName != null
+            ? session.graph.uniquePageId(selection.pageName)
+            : null;
         const nodes: SerializedNode[] = [];
         const missingNodeIds: string[] = [];
         for (const id of selection.nodeIds) {
@@ -562,6 +602,12 @@ export const createKiwiMcpServer = (
           selectionVerified: selection.complete,
           complete: selection.complete,
           missingNodeIds,
+          ...(currentPageId === null
+            ? {}
+            : {
+                currentPage: { id: currentPageId, name: selection.pageName, type: 'CANVAS' },
+                note: 'No elements are selected. Call get_design_context without nodeId for an overview of the current page.',
+              }),
           ...(selection.complete
             ? {}
             : {
@@ -661,6 +707,7 @@ export const createKiwiMcpServer = (
     {
       description:
         'Return bounded browser-captured design context for a node id, pasted Figma URL, or the current selection. ' +
+        'With a verified empty selection, return an overview of the current page. ' +
         'Use detail full for implementation, compact for structure, and minimal for an outline.',
       inputSchema: z.object({
         nodeId: z.string().optional(),
@@ -673,10 +720,12 @@ export const createKiwiMcpServer = (
     },
     async ({ nodeId, depth, detail, tabId, fileKey }) => {
       const result = await pickNode(capture, routing, nodeId, {
+        allowPageOverview: true,
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
+      if (result.pageOverview) return textResult(pageOverviewForResult(result));
       const resolvedDetail = detail ?? 'full';
       const preflightReason = projectionBudgetReason(result.captured, resolvedDetail, 'design');
       if (preflightReason !== null) {
@@ -843,16 +892,28 @@ export const createKiwiMcpServer = (
         'Prepare one bounded, client-independent implementation payload for the selected Figma subtree. ' +
         'It combines full design context, asset inventory, project profile, component reuse, icon reuse, ' +
         'and observed-color token candidates. Pass the codebase rootDir; follow sectionPlan when returned. ' +
+        'With a verified empty selection, return a current-page overview before grounding. ' +
         'A section-plan response deliberately defers design projection and project grounding until its sections are requested.',
       inputSchema: projectMapInput.extend({ rootDir: z.string().min(1) }),
       annotations: READ_ONLY,
     },
     async ({ nodeId, depth, threshold, rootDir, tabId, fileKey }) => {
       const result = await pickNode(capture, routing, nodeId, {
+        allowPageOverview: true,
         ...(depth === undefined ? {} : { depth }),
         ...(tabId === undefined ? {} : { tabId }),
         ...(fileKey === undefined ? {} : { fileKey }),
       });
+      if (result.pageOverview) {
+        const overview = pageOverviewForResult(result);
+        return textResult({
+          ...overview,
+          schemaVersion: IMPLEMENTATION_CONTEXT_SCHEMA_VERSION,
+          designSchemaVersion: overview.schemaVersion,
+          deferred: ['design', 'assets', 'project', 'grounding'],
+          note: 'This is a bounded overview, not the full page contents. Request each section nodeId with get_implementation_context using the same rootDir.',
+        });
+      }
       if (result.stats.nodeLimitReached || result.stats.depthLimitReached) {
         const plan = sectionPlanForResult(
           result,

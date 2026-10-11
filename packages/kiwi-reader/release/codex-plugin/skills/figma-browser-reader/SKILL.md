@@ -19,6 +19,11 @@ strictly read-only and does not use Figma REST API tokens, OAuth, or the Figma P
    or a Figma URL. Trust current selection only when `selectionVerified` and `complete` are true;
    a legacy URL target can remain on the page or a previous node. For multiple `selectedNodeIds`,
    read each explicit ID. Missing DOM rows or `missingNodeIds` are gaps, not proof of no selection.
+   When the verified, complete selection has `selectionCount: 0`, call `get_design_context` without
+   `nodeId` for a bounded overview of the current page. For implementation use
+   `get_implementation_context` with the actual `rootDir`. A `scope: page-overview` response is a
+   reading plan; follow `sectionPlan` before claiming to have read the page contents. Unknown or
+   incomplete selection must never be treated as empty.
    When several decoded tabs make the target ambiguous, call `list_files`. In stdio
    mode, use `use_file`; in shared HTTP mode, pass that tab's `fileKey` or `tabId` to each read.
 4. Keep reads bounded. Follow `sectionPlan` and truncation metadata by requesting smaller subtrees
