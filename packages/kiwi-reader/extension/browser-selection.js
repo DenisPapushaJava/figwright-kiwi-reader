@@ -93,6 +93,25 @@ export const readBrowserSelection = async () => {
     if (event.isTrusted) interrupted = true;
   };
   const settle = () => new Promise(resolve => setTimeout(resolve, 32));
+  const viewportRendered = () => {
+    const viewport = scroller.getBoundingClientRect();
+    const content = tree.getBoundingClientRect();
+    const style = getComputedStyle(tree);
+    const top = Math.max(viewport.top, content.top + (Number.parseFloat(style.paddingTop) || 0));
+    const bottom = Math.min(
+      viewport.bottom,
+      content.bottom - (Number.parseFloat(style.paddingBottom) || 0),
+    );
+    let first = Infinity;
+    let last = -Infinity;
+    for (const row of tree.querySelectorAll('[role="row"]')) {
+      const bounds = row.getBoundingClientRect();
+      if (bounds.bottom <= bounds.top) continue;
+      first = Math.min(first, bounds.top);
+      last = Math.max(last, bounds.bottom);
+    }
+    return bottom > top && first <= top + 1 && last >= bottom - 1;
+  };
   const sameSelection = current =>
     !interrupted &&
     current.url === initial.url &&
@@ -107,8 +126,13 @@ export const readBrowserSelection = async () => {
     while (Date.now() < deadline) {
       if (!sameSelection(snapshot())) break;
       scroller.scrollTop = top;
-      // oxlint-disable-next-line no-await-in-loop -- Each viewport must render before reading its rows.
-      await settle();
+      // Scroll offsets update before Figma renders virtual rows. Do not skip a viewport
+      // (or declare the bottom exhausted) while its rows still belong to an earlier one.
+      do {
+        // oxlint-disable-next-line no-await-in-loop -- Wait for this viewport within the shared deadline.
+        await settle();
+        if (!sameSelection(snapshot())) break;
+      } while (Date.now() < deadline && !viewportRendered());
       const current = snapshot();
       if (!sameSelection(current)) break;
       collect(current.roots);
@@ -124,6 +148,7 @@ export const readBrowserSelection = async () => {
         interrupted = true;
         break;
       }
+      if (!viewportRendered()) break;
       const bottom = scroller.scrollHeight - scroller.clientHeight;
       if (top >= bottom) {
         incompleteReason = 'rows-unavailable';

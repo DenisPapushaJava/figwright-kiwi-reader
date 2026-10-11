@@ -28,21 +28,28 @@ const mockDom = (label: string, roots: string[][], pageName: string | null = nul
   });
 };
 
-const virtualDom = (selected: number[], totalRows = 100, initialTop = 640) => {
+const virtualDom = (selected: number[], totalRows = 100, initialTop = 640, renderDelay = 0) => {
   vi.useFakeTimers();
   const state = {
     label: `Figma Design, ${selected.length} items selected`,
     pageName: 'Current page',
     url: 'https://www.figma.com/design/file/Test',
     top: initialTop,
+    renderedTop: initialTop,
+    paddingTop: 0,
+    paddingBottom: 0,
     writes: [] as number[],
     onScroll: (_top: number) => {},
   };
+  let renderTimer: ReturnType<typeof setTimeout> | undefined;
+  const firstRenderedRow = () =>
+    Math.max(0, Math.floor((state.renderedTop - state.paddingTop) / 32));
   const listeners = new Map<string, (event: { isTrusted: boolean }) => void>();
   const scroller = {
     clientHeight: 320,
     scrollHeight: totalRows * 32,
     parentElement: null,
+    getBoundingClientRect: () => ({ top: 0, bottom: 320 }),
     get scrollTop() {
       return state.top;
     },
@@ -50,6 +57,13 @@ const virtualDom = (selected: number[], totalRows = 100, initialTop = 640) => {
       state.top = top;
       state.writes.push(top);
       state.onScroll(top);
+      if (renderDelay === 0) state.renderedTop = top;
+      else {
+        clearTimeout(renderTimer);
+        renderTimer = setTimeout(() => {
+          state.renderedTop = top;
+        }, renderDelay);
+      }
     },
   };
   const tree = {
@@ -57,12 +71,24 @@ const virtualDom = (selected: number[], totalRows = 100, initialTop = 640) => {
     scrollHeight: totalRows * 32,
     parentElement: scroller,
     isConnected: true,
+    getBoundingClientRect: () => ({
+      top: -state.top,
+      bottom: totalRows * 32 + state.paddingTop + state.paddingBottom - state.top,
+    }),
+    querySelectorAll: () =>
+      Array.from({ length: Math.min(11, totalRows - firstRenderedRow()) }, (_, i) => {
+        const index = firstRenderedRow() + i;
+        return {
+          getBoundingClientRect: () => ({
+            top: index * 32 + state.paddingTop - state.top,
+            bottom: (index + 1) * 32 + state.paddingTop - state.top,
+          }),
+        };
+      }),
   };
   const roots = () =>
     selected
-      .filter(
-        index => index >= Math.floor(state.top / 32) && index < Math.floor(state.top / 32) + 10,
-      )
+      .filter(index => index >= firstRenderedRow() && index < firstRenderedRow() + 11)
       .map(index => row([`1:${index}`], index));
   vi.stubGlobal('location', {
     get href() {
@@ -71,6 +97,8 @@ const virtualDom = (selected: number[], totalRows = 100, initialTop = 640) => {
   });
   vi.stubGlobal('getComputedStyle', (element: unknown) => ({
     overflowY: element === scroller ? 'auto' : 'visible',
+    paddingTop: `${state.paddingTop}px`,
+    paddingBottom: `${state.paddingBottom}px`,
   }));
   vi.stubGlobal('document', {
     querySelector: (selector: string) => {
@@ -221,6 +249,75 @@ describe('Figma DOM selection', () => {
       incompleteReason: 'rows-unavailable',
     });
     expect(state.top).toBe(640);
+  });
+
+  it('waits for delayed virtual rows instead of skipping most of a large selection', async () => {
+    const selected = Array.from({ length: 91 }, (_, index) => index);
+    const { state, listeners } = virtualDom(selected, 100, 640, 160);
+    const pending = readBrowserSelection();
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      nodeIds: selected.map(index => `1:${index}`),
+      count: 91,
+      complete: true,
+    });
+    expect(state.top).toBe(640);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('waits for the last viewport to render before declaring rows unavailable', async () => {
+    const { state } = virtualDom([99], 100, 640, 160);
+    const pending = readBrowserSelection();
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({ nodeIds: ['1:99'], count: 1, complete: true });
+    expect(state.top).toBe(640);
+  });
+
+  it('allows the layer tree padding at the ends of the rendered range', async () => {
+    const { state, scroller } = virtualDom([99], 100, 640, 160);
+    state.label = 'Figma Design, 2 items selected';
+    state.paddingTop = 4;
+    state.paddingBottom = 18;
+    scroller.scrollHeight += 22;
+    const pending = readBrowserSelection();
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      nodeIds: ['1:99'],
+      complete: false,
+      incompleteReason: 'rows-unavailable',
+    });
+    expect(state.top).toBe(640);
+  });
+
+  it('keeps the deadline when virtual rows never render and does not skip ahead', async () => {
+    const { state, listeners } = virtualDom([0, 99], 100, 640, 20_000);
+    const started = Date.now();
+    let finished = 0;
+    const pending = readBrowserSelection().then(result => {
+      finished = Date.now();
+      return result;
+    });
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(await pending).toMatchObject({ complete: false, incompleteReason: 'scan-timeout' });
+    expect(finished - started).toBeLessThan(8_100);
+    expect(state.writes).toEqual([0, 640]);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('cancels while waiting for virtual rows without undoing user input', async () => {
+    const { state, listeners } = virtualDom([0, 20, 99], 100, 640, 160);
+    state.onScroll = top => {
+      if (top === 0) setTimeout(() => listeners.get('wheel')?.({ isTrusted: true }), 64);
+    };
+    const pending = readBrowserSelection();
+    await vi.runAllTimersAsync();
+    expect(await pending).toMatchObject({
+      nodeIds: [],
+      complete: false,
+      incompleteReason: 'selection-changed',
+    });
+    expect(state.writes).toEqual([0]);
+    expect(listeners.size).toBe(0);
   });
 
   it.each(['pointerdown', 'keydown', 'wheel', 'touchstart'])(
