@@ -87,6 +87,26 @@ describe('Kiwi extension background messages', () => {
       | ((source: { tabId: number }, method: string, params: Record<string, unknown>) => void)
       | undefined;
     const sockets: FakeSocket[] = [];
+    let deferredSelection: Promise<unknown> | undefined;
+    const selectionResponse = {
+      result: {
+        value: {
+          url: 'https://www.figma.com/design/file/Test',
+          count: 2,
+          nodeIds: ['4990:19595', '4990:19603'],
+          complete: true,
+        },
+      },
+    };
+    const sendCommand = vi.fn<
+      (target: unknown, command: string, params?: unknown) => Promise<unknown>
+    >(async (_target, command) =>
+      command === 'Network.getResponseBody'
+        ? { body: 'aGVsbG8=', base64Encoded: true }
+        : command === 'Runtime.evaluate'
+          ? (deferredSelection ?? selectionResponse)
+          : undefined,
+    );
     class FakeSocket extends EventTarget {
       static readonly OPEN = 1;
       readyState = 0;
@@ -138,23 +158,7 @@ describe('Kiwi extension background messages', () => {
       debugger: {
         attach: vi.fn<(target: unknown, version: string) => Promise<void>>(async () => undefined),
         detach: vi.fn<(target: unknown) => Promise<void>>(async () => undefined),
-        sendCommand: vi.fn<(target: unknown, command: string) => Promise<unknown>>(
-          async (_target: unknown, command: string) =>
-            command === 'Network.getResponseBody'
-              ? { body: 'aGVsbG8=', base64Encoded: true }
-              : command === 'Runtime.evaluate'
-                ? {
-                    result: {
-                      value: {
-                        url: 'https://www.figma.com/design/file/Test',
-                        count: 2,
-                        nodeIds: ['4990:19595', '4990:19603'],
-                        complete: true,
-                      },
-                    },
-                  }
-                : undefined,
-        ),
+        sendCommand,
         onEvent: event<NonNullable<typeof onDebuggerEvent>>(listener => {
           onDebuggerEvent = listener;
         }),
@@ -209,6 +213,34 @@ describe('Kiwi extension background messages', () => {
         }),
       ),
     );
+    expect(sendCommand).toHaveBeenCalledWith(
+      { tabId: 42 },
+      'Runtime.evaluate',
+      expect.objectContaining({ awaitPromise: true, timeout: 10_000 }),
+    );
+    let resolveSelection: ((response: unknown) => void) | undefined;
+    deferredSelection = new Promise(resolve => {
+      resolveSelection = resolve;
+    });
+    for (const requestId of ['parallel-1', 'parallel-2']) {
+      first?.dispatchEvent(
+        new MessageEvent('message', {
+          data: JSON.stringify({ type: 'capture-selection-request', tabId: 42, requestId }),
+        }),
+      );
+    }
+    expect(
+      sendCommand.mock.calls.filter(([, command]) => command === 'Runtime.evaluate'),
+    ).toHaveLength(2);
+    resolveSelection?.(selectionResponse);
+    await vi.waitFor(() => {
+      for (const requestId of ['parallel-1', 'parallel-2']) {
+        expect(first?.sent).toContainEqual(
+          expect.objectContaining({ type: 'capture-selection', requestId }),
+        );
+      }
+    });
+    deferredSelection = undefined;
     await expect(
       invoke({ type: 'set-capture-options', tabId: 42, captureImages: false }),
     ).resolves.toMatchObject({ ok: true });

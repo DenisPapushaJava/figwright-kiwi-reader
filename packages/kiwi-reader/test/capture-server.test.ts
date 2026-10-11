@@ -113,9 +113,25 @@ describe('KiwiCaptureServer', () => {
     });
     await expect(partial).resolves.toMatchObject({ count: 2, complete: false });
 
-    const stale = server.requestSelection(17).catch((error: unknown) => error);
+    const inconsistent = server.requestSelection(17);
     await expect.poll(() => requests.length).toBe(3);
     respond(2, {
+      selection: {
+        url: hello.url,
+        count: 0,
+        nodeIds: [],
+        complete: true,
+        incompleteReason: 'selection-changed',
+      },
+    });
+    await expect(inconsistent).resolves.toMatchObject({
+      complete: false,
+      incompleteReason: 'selection-changed',
+    });
+
+    const stale = server.requestSelection(17).catch((error: unknown) => error);
+    await expect.poll(() => requests.length).toBe(4);
+    respond(3, {
       selection: {
         url: 'https://www.figma.com/design/other/Test',
         count: 0,

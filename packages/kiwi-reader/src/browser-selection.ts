@@ -11,8 +11,18 @@ export const BrowserSelectionSchema = z.object({
         .max(2_000)
         .regex(/^(?:I)?\d+:\d+(?:;\d+:\d+)*$/),
     )
-    .max(100),
+    .max(10_000)
+    .refine(ids => ids.reduce((sum, id) => sum + id.length, 0) <= 200_000),
   complete: z.boolean(),
+  incompleteReason: z
+    .enum([
+      'selection-unavailable',
+      'selection-limit',
+      'rows-unavailable',
+      'selection-changed',
+      'scan-timeout',
+    ])
+    .optional(),
 });
 
 export type BrowserSelection = z.infer<typeof BrowserSelectionSchema>;

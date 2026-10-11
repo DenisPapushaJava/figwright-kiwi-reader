@@ -18,6 +18,7 @@ const captureTimers = new Map();
 const blockedFrameTabs = new Set();
 const imageRequests = new Map();
 const sentImageUrls = new Map();
+const selectionReads = new Map();
 let bridge = null;
 let connecting = null;
 let keepAlive = null;
@@ -109,6 +110,7 @@ const removeAttachedTab = (tabId, publish = true) => {
   blockedFrameTabs.delete(tabId);
   imageRequests.delete(tabId);
   sentImageUrls.delete(tabId);
+  selectionReads.delete(tabId);
   const wasAttached = attachedTabs.delete(tabId);
   if (wasAttached) send({ type: 'detach', tabId });
   if (publish) void publishState(tabId, initialState(tabId));
@@ -314,12 +316,18 @@ const captureReference = async message => {
 
 const captureSelection = async ({ tabId, requestId }) => {
   if (!attachedTabs.has(tabId) || typeof requestId !== 'string') return;
+  let read = selectionReads.get(tabId);
   try {
-    const response = await chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
-      expression: `(${readBrowserSelection.toString()})()`,
-      returnByValue: true,
-      timeout: 2_000,
-    });
+    if (read === undefined) {
+      read = chrome.debugger.sendCommand({ tabId }, 'Runtime.evaluate', {
+        expression: `(${readBrowserSelection.toString()})()`,
+        returnByValue: true,
+        awaitPromise: true,
+        timeout: 10_000,
+      });
+      selectionReads.set(tabId, read);
+    }
+    const response = await read;
     if (response?.exceptionDetails || response?.result?.value === undefined) {
       throw new Error('Chrome could not read the Figma selection');
     }
@@ -331,6 +339,8 @@ const captureSelection = async ({ tabId, requestId }) => {
       requestId,
       message: error instanceof Error ? error.message : String(error),
     });
+  } finally {
+    if (selectionReads.get(tabId) === read) selectionReads.delete(tabId);
   }
 };
 
@@ -414,6 +424,7 @@ const reloadCapture = async tabId => {
   blockedFrameTabs.delete(tabId);
   imageRequests.set(tabId, new Map());
   sentImageUrls.set(tabId, new Set());
+  selectionReads.delete(tabId);
   await publishState(tabId, {
     phase: 'reloading',
     errorCode: null,

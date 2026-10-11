@@ -523,7 +523,7 @@ export class KiwiCaptureServer extends EventEmitter {
     });
   }
 
-  requestSelection(tabId: number, timeoutMs = 3_000): Promise<BrowserSelection> {
+  requestSelection(tabId: number, timeoutMs = 12_000): Promise<BrowserSelection> {
     const socket = this.socket;
     const session = this.sessionMap.get(tabId);
     if (socket === null || socket.readyState !== socket.OPEN || session === undefined) {
@@ -757,7 +757,10 @@ export class KiwiCaptureServer extends EventEmitter {
       ...selection,
       nodeIds,
       complete:
-        selection.complete && selection.count !== null && selection.count === nodeIds.length,
+        selection.complete &&
+        selection.incompleteReason === undefined &&
+        selection.count !== null &&
+        selection.count === nodeIds.length,
     });
   }
 
