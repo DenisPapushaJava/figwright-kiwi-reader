@@ -1,6 +1,8 @@
 import { decompress } from 'fzstd';
 import { compileSchema, decodeBinarySchema } from 'kiwi-schema';
 
+import { ZstdMessageStream } from './zstd-message-stream.js';
+
 const FIG_WIRE_MAGIC = new TextEncoder().encode('fig-wire');
 const ZSTD_MAGIC = Uint8Array.of(0x28, 0xb5, 0x2f, 0xfd);
 
@@ -35,6 +37,7 @@ export const decodePayload = (payload: string): Uint8Array =>
  */
 export class KiwiWireDecoder {
   private codec: KiwiCodec | null = null;
+  private zstd: ZstdMessageStream | null = null;
 
   get ready(): boolean {
     return this.codec !== null;
@@ -42,6 +45,7 @@ export class KiwiWireDecoder {
 
   reset(): void {
     this.codec = null;
+    this.zstd = null;
   }
 
   ingestBase64(payload: string): DecodeResult {
@@ -56,14 +60,24 @@ export class KiwiWireDecoder {
         const schemaBytes = decompress(compressedSchema);
         const schema = decodeBinarySchema(schemaBytes);
         this.codec = compileSchema(schema) as KiwiCodec;
+        this.zstd = null;
         return { kind: 'schema' };
       }
 
       if (this.codec === null) return { kind: 'waiting-for-schema' };
 
-      const bytes = isZstdFrame(input) ? decompress(input) : input;
+      if (isZstdFrame(input)) {
+        const stream = new ZstdMessageStream();
+        const bytes = stream.push(input);
+        // Independent compressed control messages may arrive between streamed snapshots.
+        if (!stream.complete) this.zstd = stream;
+        return { kind: 'message', message: this.codec.decodeMessage(bytes) };
+      }
+      const bytes = this.zstd === null ? input : this.zstd.push(input);
+      if (this.zstd?.complete) this.zstd = null;
       return { kind: 'message', message: this.codec.decodeMessage(bytes) };
     } catch (error) {
+      this.zstd = null;
       return {
         kind: 'ignored',
         error: error instanceof Error ? error.message : String(error),

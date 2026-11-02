@@ -1,11 +1,73 @@
-import { zstdCompressSync } from 'node:zlib';
+import { once } from 'node:events';
+import { constants, createZstdCompress, zstdCompressSync } from 'node:zlib';
 
 import { compileSchema, encodeBinarySchema, parseSchema } from 'kiwi-schema';
 import { describe, expect, it } from 'vitest';
 
 import { isFigWireFrame, isZstdFrame, KiwiWireDecoder } from '../src/wire.js';
 
+const streamingMessages = async (messages: Uint8Array[]): Promise<Uint8Array[]> => {
+  const compressor = createZstdCompress();
+  let chunks: Buffer[] = [];
+  const result: Uint8Array[] = [];
+  compressor.on('data', (chunk: Buffer) => chunks.push(chunk));
+  for (const message of messages.slice(0, -1)) {
+    compressor.write(message);
+    // oxlint-disable-next-line no-await-in-loop -- Each websocket message ends at a compression flush.
+    await new Promise<void>(resolve => {
+      compressor.flush(constants.ZSTD_e_flush, resolve);
+    });
+    result.push(Buffer.concat(chunks));
+    chunks = [];
+  }
+  compressor.end(messages.at(-1));
+  await once(compressor, 'end');
+  result.push(Buffer.concat(chunks));
+  return result;
+};
+
 describe('Kiwi wire detection', () => {
+  it('decodes flushed messages from one Zstandard stream and keeps legacy raw messages working', async () => {
+    const schema = parseSchema(`
+      message NodeChange {
+        string name = 1;
+      }
+      message Message {
+        NodeChange[] nodeChanges = 1;
+      }
+    `);
+    const codec = compileSchema(schema) as { encodeMessage: (value: unknown) => Uint8Array };
+    const schemaBytes = zstdCompressSync(encodeBinarySchema(schema));
+    const schemaFrame = new Uint8Array(12 + schemaBytes.length);
+    schemaFrame.set(new TextEncoder().encode('fig-wire'));
+    schemaFrame.set(schemaBytes, 12);
+    const names = ['First page', 'Second screen', 'Last component'];
+    const messages = names.map(name => ({ nodeChanges: [{ name }] }));
+    const encoded = messages.map(message => codec.encodeMessage(message));
+    const packets = await streamingMessages(encoded);
+    expect(isZstdFrame(packets[0]!)).toBe(true);
+    expect(isZstdFrame(packets[1]!)).toBe(false);
+    const decoder = new KiwiWireDecoder();
+    expect(decoder.ingest(schemaFrame)).toEqual({ kind: 'schema' });
+    for (const [i, packet] of packets.entries()) {
+      expect(decoder.ingest(packet)).toEqual({ kind: 'message', message: messages[i] });
+      expect(decoder.ingest(zstdCompressSync(codec.encodeMessage({})))).toEqual({
+        kind: 'message',
+        message: {},
+      });
+    }
+    expect(decoder.ingest(encoded[0]!)).toEqual({ kind: 'message', message: messages[0] });
+    expect(decoder.ingest(zstdCompressSync(encoded[1]!))).toEqual({
+      kind: 'message',
+      message: messages[1],
+    });
+    decoder.ingest(packets[0]!);
+    decoder.reset();
+    expect(decoder.ready).toBe(false);
+    expect(decoder.ingest(schemaFrame)).toEqual({ kind: 'schema' });
+    expect(decoder.ingest(encoded[0]!)).toEqual({ kind: 'message', message: messages[0] });
+  });
+
   it('recognizes the schema prelude', () => {
     const bytes = new TextEncoder().encode('fig-wire');
     const frame = new Uint8Array(12);
